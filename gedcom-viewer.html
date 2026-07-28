@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"/>
+<title>GEDCOM Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="preconnect" href="https://unpkg.com"/>
+<link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin/>
+<link rel="dns-prefetch" href="https://nominatim.openstreetmap.org"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"/>
+<style>
+/* ============================================================
+   GEDCOM Viewer — single-file, read-only family tree browser.
+   Open a .ged file; it parses to individuals + families and lets
+   you browse the tree, the people list and each person's details.
+   Plain HTML + CSS + vanilla JS. No frameworks, no build step.
+   ============================================================ */
+:root{
+  --bg:#F3F5F8; --panel:#FFFFFF; --panel2:#EDF1F6; --text:#191D23;
+  --soft:#505A68; --faint:#737E8C; --line:#C9CED6;
+  --green:#24529A; --green-soft:#DFE8F6; --brass:#D87822; --brass-soft:#F5DCC6;
+  --danger:#B34F4A; --shadow:rgba(29,49,78,.10); --on-green:#fff;
+  --navh:calc(56px + env(safe-area-inset-bottom,0px));
+  --disp:'Barlow Condensed',Arial Narrow,'Segoe UI',sans-serif;
+  --body:'IBM Plex Sans','Segoe UI',Arial,sans-serif;
+  --mono:'IBM Plex Mono','Cascadia Mono',Consolas,monospace;
+}
+[data-theme="dark"]{
+  --bg:#10151C; --panel:#181F29; --panel2:#222C39; --text:#F3F5F8;
+  --soft:#C0C8D3; --faint:#8290A2; --line:#354253;
+  --green:#7EA8F2; --green-soft:#263B58; --brass:#F29B4B; --brass-soft:#613719;
+  --danger:#E07A74; --shadow:rgba(0,0,0,.4); --on-green:#10151C;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font-smoothing:antialiased;
+  overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input{font-family:inherit}
+:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
+
+#app{display:flex;flex-direction:column;height:100%;overflow:hidden}
+header{display:flex;align-items:center;gap:8px;min-height:56px;padding:0 10px;padding-top:env(safe-area-inset-top,0px);
+  border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:17px;letter-spacing:-.02em;white-space:nowrap}
+.brand .sub{font:500 10px var(--mono);color:var(--faint);letter-spacing:0}
+.count{font:600 11px var(--mono);color:var(--brass);background:var(--brass-soft);padding:3px 8px;border-radius:20px}
+.searchbox{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:4px;
+  background:var(--panel2);flex:1;max-width:240px;margin-left:auto}
+.searchbox input{background:none;border:none;outline:none;color:var(--text);font-size:15px;width:100%}
+.btn{display:flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 14px;border-radius:4px;font-size:14px;font-weight:600}
+.btn.primary{background:var(--green);color:var(--on-green)}
+.btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+.iconbtn{width:38px;height:38px;border-radius:4px;background:var(--panel2);color:var(--soft);display:grid;place-items:center;flex-shrink:0}
+.tabs{display:flex;gap:2px;padding:4px;border-radius:4px;background:var(--panel2)}
+.tab{display:flex;align-items:center;gap:6px;padding:9px 13px;border-radius:4px;font-size:14px;font-weight:500;color:var(--soft)}
+.tab.on{background:var(--panel);color:var(--green);box-shadow:0 1px 4px var(--shadow)}
+.hide-mobile{display:flex}
+
+.body{flex:1;display:flex;min-height:0;position:relative}
+main{flex:1;min-width:0;position:relative}
+
+.banner{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;gap:8px;
+  padding:8px 12px;font-size:12.5px;background:var(--brass-soft);color:#8a4d10}
+[data-theme="dark"] .banner{color:var(--brass)}
+.banner b{font-weight:700}
+.banner button{margin-left:auto;color:inherit;opacity:.7;padding:2px}
+
+/* tree */
+#tree{position:absolute;inset:0;overflow:hidden;cursor:grab;touch-action:none;
+  background-image:radial-gradient(var(--line) 1px,transparent 1px);background-size:26px 26px}
+#tree:active{cursor:grabbing}
+#tree svg{position:absolute;inset:0;width:100%;height:100%}
+.node rect{fill:var(--panel);stroke:var(--line);stroke-width:1.4;filter:drop-shadow(0 2px 5px var(--shadow))}
+.node.line rect{stroke:var(--green)}
+.node.sel rect{fill:var(--green-soft);stroke:var(--brass);stroke-width:2.5}
+.node .nm{font:600 13.5px var(--disp);fill:var(--text)}
+.node .sn{font:500 12px var(--disp);fill:var(--soft)}
+.node .dt{font:11px var(--mono);fill:var(--faint)}
+.av-f{fill:var(--brass-soft);stroke:var(--brass)} .av-m{fill:var(--green-soft);stroke:var(--green)}
+.av-f-t{fill:var(--brass)} .av-m-t{fill:var(--green)}
+.link{fill:none;stroke:var(--line);stroke-width:1.6}
+.link.on{stroke:var(--brass);stroke-width:2.4}
+.mbar{stroke:var(--soft);stroke-width:1.6}
+.controls{position:absolute;top:12px;right:12px;display:flex;flex-direction:column;
+  border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--panel);box-shadow:0 2px 8px var(--shadow)}
+.controls button{width:42px;height:42px;display:grid;place-items:center;color:var(--soft)}
+.controls button+button{border-top:1px solid var(--line)}
+.hint{position:absolute;left:12px;bottom:12px;font:11px var(--mono);color:var(--faint);
+  background:var(--panel);border:1px solid var(--line);padding:5px 9px;border-radius:4px;pointer-events:none;
+  animation:hintfade .6s ease 4.5s forwards}
+@keyframes hintfade{to{opacity:0;visibility:hidden}}
+.tmode{position:absolute;top:12px;left:12px;display:flex;gap:2px;padding:3px;border-radius:4px;
+  background:var(--panel);border:1px solid var(--line);box-shadow:0 2px 8px var(--shadow);z-index:6}
+.tmode button{padding:9px 13px;border-radius:4px;font-size:13px;font-weight:600;color:var(--soft)}
+.tmode button.on{background:var(--green);color:var(--on-green)}
+.focalbar{position:absolute;top:52px;left:12px;font:11px var(--mono);color:var(--soft);
+  background:var(--panel);border:1px solid var(--line);padding:4px 9px;border-radius:4px;pointer-events:none;max-width:70%}
+.tkey{position:absolute;top:12px;right:56px;display:flex;flex-direction:column;gap:6px;font:11px var(--mono);
+  color:var(--soft);background:var(--panel);border:1px solid var(--line);padding:9px 11px;border-radius:4px;
+  box-shadow:0 6px 18px var(--shadow);pointer-events:none;z-index:6}
+.tkey-h{font:600 12px var(--disp);color:var(--text);margin-bottom:1px}
+.tkey span{display:flex;align-items:center;gap:8px}
+.tkey i{width:20px;border-top-width:2px;border-top-style:solid;display:inline-block}
+
+/* list */
+#list{position:absolute;inset:0;overflow-y:auto;padding:16px;padding-bottom:70px}
+.list-wrap{max-width:640px;margin:0 auto;display:grid;gap:8px}
+.person{display:flex;align-items:center;gap:12px;padding:12px;border-radius:4px;border:1px solid var(--line);background:var(--panel);text-align:left;width:100%}
+.person.sel{background:var(--green-soft);border-color:var(--green)}
+.avatar{display:grid;place-items:center;height:40px;width:40px;border-radius:50%;font-size:13px;font-weight:700;flex-shrink:0}
+.avatar.f{background:var(--brass-soft);color:var(--brass)} .avatar.m{background:var(--green-soft);color:var(--green)}
+.person .who{min-width:0;flex:1}
+.person .who .n{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.person .who .s{font:12px var(--mono);color:var(--soft)}
+.pill{font:10px var(--mono);padding:2px 8px;border-radius:999px;background:var(--brass-soft);color:var(--brass)}
+.empty{text-align:center;padding:40px 24px;color:var(--faint);font-size:14px}
+.empty .big{margin:0 auto 16px;width:56px;height:56px;border-radius:4px;background:var(--panel2);display:grid;place-items:center;color:var(--green)}
+
+/* detail panel */
+#panel{width:360px;flex-shrink:0;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+#panel.hidden{display:none}
+.p-head{display:flex;align-items:flex-start;gap:12px;padding:16px 16px 12px}
+.p-head .avatar{height:56px;width:56px;border-radius:4px;font-size:18px}
+.p-head h2{margin:0;font-size:20px;letter-spacing:-.01em;line-height:1.15}
+.p-sub{font-size:13px;color:var(--soft)} .p-life{font:13px var(--mono);color:var(--soft);margin-top:2px}
+.grip{width:40px;height:4px;border-radius:4px;background:var(--line);margin:8px auto 2px;display:none}
+.p-body{flex:1;overflow-y:auto;padding:0 16px 12px}
+.fact{display:flex;align-items:center;gap:8px;font-size:13px;margin:4px 0}
+.fact .lab{width:38px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:600;color:var(--faint)}
+.fact .val{font:13px var(--mono);color:var(--text)}
+.rel-group{margin:14px 0}
+.rel-label{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-bottom:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:5px 10px;border-radius:999px;background:var(--panel2);color:var(--text);font-size:14px;font-weight:500}
+.p-foot{padding:12px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.p-foot .btn{width:100%;border:1px solid var(--line);color:var(--soft)}
+.close{margin-left:auto;width:38px;height:38px;display:grid;place-items:center;color:var(--faint);border-radius:4px}
+.close:active{background:var(--panel2)}
+
+/* map */
+#mapwrap{position:absolute;inset:0;display:flex;flex-direction:column}
+.map-top{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
+.map-status{font:11px var(--mono);color:var(--soft)}
+#lmap{flex:1;min-height:0;background:var(--panel2)}
+.map-msg{padding:18px;text-align:center;color:var(--soft);font-size:14px}
+.mr-row{display:block;width:100%;text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);background:none}
+.mr-row:active{background:var(--panel2)}
+.mr-name{font-weight:600;font-size:14.5px}
+.mr-fact{font:12px var(--mono);color:var(--soft);margin-top:2px}
+.mr-fact span{color:var(--faint);margin-right:6px}
+.mr-empty{padding:14px;color:var(--faint);font-size:14px}
+.leaflet-popup-content{font-family:var(--body)}
+.slider-wrap{padding:12px 18px;border-top:1px solid var(--line);background:var(--panel);flex-shrink:0}
+.slider-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.slider-head .yr{font:700 18px var(--mono);color:var(--brass)}
+.rng{display:flex;align-items:center;gap:10px;margin:6px 0}
+.rng>span{font:11px var(--mono);color:var(--soft);width:34px;flex-shrink:0}
+.ticks{display:flex;justify-content:space-between;font:10px var(--mono);color:var(--faint);margin-top:4px}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;background:transparent}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:4px;background:var(--line)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;margin-top:-6px;width:16px;height:16px;border-radius:50%;background:var(--brass)}
+input[type=range]::-moz-range-track{height:4px;border-radius:4px;background:var(--line)}
+input[type=range]::-moz-range-thumb{border:none;width:16px;height:16px;border-radius:50%;background:var(--brass)}
+
+/* toast */
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--green);
+  color:var(--on-green);padding:12px 18px;border-radius:4px;font-weight:600;font-size:14px;
+  box-shadow:0 8px 24px var(--shadow);opacity:0;pointer-events:none;transition:.25s;z-index:50;max-width:88vw;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.err{background:var(--danger)}
+
+/* mobile dismiss scrim */
+#scrim{position:fixed;left:0;right:0;top:0;bottom:var(--navh);background:rgba(12,16,12,.4);z-index:15;
+  opacity:0;pointer-events:none;transition:opacity .2s}
+#scrim.on{opacity:1;pointer-events:auto}
+@media(min-width:721px){#scrim{display:none}}
+
+@media(max-width:720px){
+  #mapwrap{bottom:var(--navh)}
+  #tree{bottom:var(--navh)}
+  .hide-mobile{display:none}
+  .brand span{display:none}
+  .count{display:none}
+  main{padding-bottom:var(--navh)}
+  #panel{position:absolute;left:0;right:0;bottom:0;width:auto;max-height:72%;z-index:16;border-left:none;border-top:1px solid var(--line);
+    border-radius:6px 6px 0 0;box-shadow:0 -8px 30px var(--shadow)}
+  .grip{display:block}
+  .mobilenav{position:absolute;left:0;right:0;bottom:0;min-height:56px;background:var(--panel);border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom,0px);display:flex;align-items:center;justify-content:space-around;z-index:20}
+  .mobilenav button{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--soft);font-size:10px;padding:8px 0;min-width:64px}
+  .mobilenav button.on{color:var(--green)}
+}
+@media(min-width:721px){.mobilenav{display:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+        <circle cx="13" cy="6" r="3.4" fill="var(--green)"/><circle cx="6" cy="19" r="3" fill="var(--brass)"/><circle cx="20" cy="19" r="3" fill="var(--brass)"/>
+        <path d="M13 9.4V13M13 13C13 16 7 15 6 16M13 13C13 16 19 15 20 16" stroke="var(--soft)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      </svg>
+      <span>GEDCOM&nbsp;Viewer</span>
+    </div>
+    <span class="count" id="count"></span>
+    <div class="tabs hide-mobile" id="tabs"></div>
+    <div class="searchbox">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="search" placeholder="Search…" autocomplete="off"/>
+    </div>
+    <button class="btn primary" data-act="open" title="Open a GEDCOM (.ged) file">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M8 7l4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <span class="hide-mobile">Open .ged</span>
+    </button>
+    <button class="iconbtn" data-act="theme" aria-label="Toggle light or dark"><span id="themeicon"></span></button>
+  </header>
+
+  <div class="body">
+    <main id="main"></main>
+    <aside id="panel" class="hidden"></aside>
+  </div>
+  <nav class="mobilenav" id="mnav"></nav>
+</div>
+
+<input type="file" id="file" style="display:none"/>
+<div id="scrim" data-act="scrim-close"></div>
+<div id="toast"></div>
+
+<script src="gazetteer.js"></script>
+<script>
+"use strict";
+/* ---- sample data (shown until you open your own .ged) ---- */
+const SAMPLE_PEOPLE=[
+ {id:"I1",given:"Arthur",surname:"Hale",sex:"M",born:{y:1901,place:"Whitby, England"},died:{y:1978,place:"Perth, Australia"}},
+ {id:"I2",given:"Edith",surname:"Hale",maiden:"Barnes",sex:"F",born:{y:1904,place:"Leeds, England"},died:{y:1989,place:"Perth, Australia"}},
+ {id:"I3",given:"William",surname:"Hale",sex:"M",born:{y:1930,place:"Leeds, England"},died:{y:2005,place:"Fremantle, Australia"}},
+ {id:"I4",given:"Margaret",surname:"Reed",maiden:"Hale",sex:"F",born:{y:1933,place:"Leeds, England"},died:{y:2018,place:"Perth, Australia"}},
+ {id:"I5",given:"Joan",surname:"Hale",maiden:"Fletcher",sex:"F",born:{y:1933,place:"York, England"},died:{y:2011,place:"Fremantle, Australia"}},
+ {id:"I6",given:"Thomas",surname:"Reed",sex:"M",born:{y:1929,place:"Sheffield, England"},died:{y:2001,place:"Perth, Australia"}},
+ {id:"I7",given:"David",surname:"Hale",sex:"M",born:{y:1958,place:"Fremantle, Australia"}},
+ {id:"I8",given:"Susan",surname:"Hale",sex:"F",born:{y:1961,place:"Fremantle, Australia"}},
+ {id:"I9",given:"Peter",surname:"Reed",sex:"M",born:{y:1959,place:"Perth, Australia"}},
+ {id:"I10",given:"Linda",surname:"Hale",maiden:"Cross",sex:"F",born:{y:1960,place:"Perth, Australia"}},
+ {id:"I11",given:"Emma",surname:"Hale",sex:"F",born:{y:1988,place:"Perth, Australia"}},
+ {id:"I12",given:"James",surname:"Hale",sex:"M",born:{y:1991,place:"Perth, Australia"}},
+];
+const SAMPLE_FAMS=[
+ {id:"F1",partners:["I1","I2"],children:["I3","I4"],married:{y:1928}},
+ {id:"F2",partners:["I3","I5"],children:["I7","I8"],married:{y:1955}},
+ {id:"F3",partners:["I4","I6"],children:["I9"],married:{y:1957}},
+ {id:"F4",partners:["I7","I10"],children:["I11","I12"],married:{y:1985}},
+];
+
+const state={people:[],fams:[],theme:"light",view:"tree",treeMode:"anc",ancFocus:null,descFocus:null,selected:null,root:null,query:"",imported:false,bannerOff:false,showKey:false,yearFrom:null,yearTo:null};
+let G=null, pan={x:40,y:40,s:1}, lastLayout={minX:0,maxX:0,maxY:0}, layoutCache={root:null,L:null};
+let mapObj=null, markersLayer=null, geoCache={};
+
+/* ---- GEDCOM parser (common 5.5.1 / 7.0 shape) ---- */
+function parseGEDCOM(text){
+  const lines=text.split(/\r\n|\r|\n/), indi={}, fam={};
+  let cur=null,type=null,sub=null;
+  const yearOf=v=>{const m=(v||"").match(/\d{3,4}/g);return m?+m[m.length-1]:undefined;};
+  const nameOf=v=>{const m=(v||"").match(/^([^\/]*)\/([^\/]*)\/?/);return m?{given:(m[1]||"").trim(),surname:(m[2]||"").trim()}:{given:(v||"").trim(),surname:""};};
+  const coord=v=>{v=(v||"").trim();const m=v.match(/([NSEW])?\s*([-+]?\d+(?:\.\d+)?)/i);if(!m)return undefined;let n=+m[2];const dd=(m[1]||"").toUpperCase();if(dd==="S"||dd==="W")n=-Math.abs(n);return n;};
+  for(const raw of lines){
+    if(!raw.trim())continue;
+    const m=raw.match(/^(\d+)\s+(@[^@]+@)?\s*(\S+)(?:\s(.*))?$/); if(!m)continue;
+    const level=+m[1],xref=m[2]||null,tag=m[3],val=m[4]!==undefined?m[4]:"";
+    if(level===0){ sub=null;
+      if(tag==="INDI"){type="INDI";cur=indi[xref]={id:xref,given:"",surname:"",sex:"",fams:[],famc:null};}
+      else if(tag==="FAM"){type="FAM";cur=fam[xref]={id:xref,partners:[],children:[]};}
+      else{type=null;cur=null;} continue; }
+    if(!cur)continue;
+    if(type==="INDI"){
+      if(level===1){ sub=null;
+        if(tag==="NAME"){const n=nameOf(val); if(!cur.given&&!cur.surname){cur.given=n.given;cur.surname=n.surname;}}
+        else if(tag==="SEX"){cur.sex=(val||"").trim().toUpperCase().startsWith("F")?"F":"M";}
+        else if(tag==="BIRT"){sub="born";cur.born=cur.born||{};}
+        else if(tag==="DEAT"){sub="died";cur.died=cur.died||{};}
+        else if(tag==="FAMS"){if(val)cur.fams.push(val.trim());}
+        else if(tag==="FAMC"){cur.famc=val.trim();}
+      } else if(level>=2&&sub){
+        if(tag==="DATE"){cur[sub].y=yearOf(val);cur[sub].date=val;}
+        else if(tag==="PLAC"){cur[sub].place=val;}
+        else if(tag==="LATI"){cur[sub].lat=coord(val);}
+        else if(tag==="LONG"){cur[sub].lon=coord(val);}
+      }
+    } else {
+      if(level===1){ sub=null;
+        if(tag==="HUSB"||tag==="WIFE"){if(val)cur.partners.push(val.trim());}
+        else if(tag==="CHIL"){if(val)cur.children.push(val.trim());}
+        else if(tag==="MARR"){sub="married";cur.married=cur.married||{};}
+        else if(tag==="DIV"){ if((val||"").trim().toUpperCase()!=="N"){cur.divorced=true;cur.div=cur.div||{};sub="div";} }
+      } else if(level>=2){
+        if(sub==="married"){ if(tag==="DATE")cur.married.y=yearOf(val); else if(tag==="PLAC")cur.married.place=val; }
+        else if(sub==="div"){ if(tag==="DATE")cur.div.y=yearOf(val); }
+      }
+    }
+  }
+  const people=Object.values(indi).map(p=>({...p,given:p.given||"(unknown)",surname:p.surname||""}));
+  const fams=Object.values(fam).filter(f=>f.partners.length||f.children.length);
+  return {people,fams};
+}
+
+/* ---- graph + relationship helpers ---- */
+function buildGraph(people,fams){
+  const byId={},childFam={},spouseFams={},famById={};
+  people.forEach(p=>byId[p.id]=p);
+  fams.forEach(f=>{famById[f.id]=f; f.children.forEach(c=>childFam[c]=f.id); f.partners.forEach(p=>(spouseFams[p]=spouseFams[p]||[]).push(f.id));});
+  const parentsOf=id=>{const f=childFam[id];return f?famById[f].partners.filter(x=>byId[x]):[];};
+  const spousesOf=id=>(spouseFams[id]||[]).flatMap(f=>famById[f].partners.filter(p=>p!==id&&byId[p]));
+  const childrenOf=id=>(spouseFams[id]||[]).flatMap(f=>famById[f].children.filter(c=>byId[c]));
+  const siblingsOf=id=>{const f=childFam[id];return f?famById[f].children.filter(c=>c!==id&&byId[c]):[];};
+  const upSet=id=>{const o=new Set(),s=[...parentsOf(id)];while(s.length){const x=s.pop();if(!o.has(x)){o.add(x);parentsOf(x).forEach(p=>s.push(p));}}return o;};
+  const downSet=id=>{const o=new Set(),s=[...childrenOf(id)];while(s.length){const x=s.pop();if(!o.has(x)){o.add(x);childrenOf(x).forEach(c=>s.push(c));}}return o;};
+  return {byId,famById,childFam,spouseFams,parentsOf,spousesOf,childrenOf,siblingsOf,upSet,downSet};
+}
+
+/* ---- tree layout: tidy descendant layout, a couple = one node ---- */
+const PW=158,PH=72,VP=30,VGAP=22,HGAP=74,COLW=PW+HGAP;
+const BAR_COLORS =['var(--soft)','var(--brass)','#B34F4A','#5D78A4']; // marriage-bar colour by order
+const LINK_COLORS=['var(--line)','var(--brass)','#B34F4A','#5D78A4']; // child-line colour by parents' marriage
+function makeTree(pid,seen){
+  if(seen.has(pid))return{pid,unions:[]}; seen.add(pid);
+  const famIds=(G.spouseFams[pid]||[]).slice().sort((a,b)=>{          // earliest marriage first
+    const ya=G.famById[a].married&&G.famById[a].married.y, yb=G.famById[b].married&&G.famById[b].married.y;
+    if(ya==null&&yb==null)return 0; if(ya==null)return 1; if(yb==null)return -1; return ya-yb; });
+  const unions=famIds.map((fid,idx)=>{const f=G.famById[fid];
+    return {idx, spouseId:f.partners.find(x=>x!==pid&&G.byId[x])||null, marriage:f.married, divorced:!!f.divorced, div:f.div,
+            kids:f.children.filter(c=>G.byId[c]).map(c=>makeTree(c,seen))};});
+  return {pid,unions};
+}
+const cardsOf=n=>1+n.unions.filter(u=>u.spouseId).length;
+const stripHOf=n=>cardsOf(n)*PH+(cardsOf(n)-1)*VP;                     // couples stack vertically
+function measure(n){
+  n.unions.forEach(u=>u.kids.forEach(measure));
+  let ch=0,first=true;
+  n.unions.forEach(u=>{ if(!u.kids.length)return; let uh=0; u.kids.forEach((k,j)=>{uh+=k._h;if(j)uh+=VGAP;}); u._ch=uh;
+    ch+=uh; if(!first)ch+=VGAP; first=false; });
+  n._h=Math.max(stripHOf(n),ch); return n._h;
+}
+function layoutTree(root,top,out){
+  const place=(n,top,depth)=>{
+    n.x=depth*COLW;                                                    // generation = column (grows rightward)
+    const kidUnions=n.unions.filter(u=>u.kids.length);
+    let totalCH=0; kidUnions.forEach((u,i)=>{totalCH+=u._ch; if(i)totalCH+=VGAP;});
+    let cy=top+(n._h-totalCH)/2;
+    kidUnions.forEach(u=>{ let ky=cy; u.kids.forEach(k=>{place(k,ky,depth+1);ky+=k._h+VGAP;}); cy+=u._ch+VGAP; });
+    const sp=n.unions.filter(u=>u.spouseId);
+    const seq=[]; if(sp.length)seq.push({u:sp[0]}); const pIndex=seq.length; seq.push({person:true});
+    for(let i=1;i<sp.length;i++)seq.push({u:sp[i]});
+    const stripTop=top+(n._h-stripHOf(n))/2;
+    seq.forEach((s,i)=>s.y=stripTop+i*(PH+VP));
+    n.py=seq[pIndex].y;
+    out.nodes.push({id:n.pid,x:n.x,y:n.py}); out.rendered.add(n.pid);
+    const pcy=n.py+PH/2;
+    seq.forEach(s=>{ if(s.u){ const sy=s.y,uidx=s.u.idx; if(uidx>=1)out.remarriage=true; if(s.u.divorced)out.divorce=true;
+      out.nodes.push({id:s.u.spouseId,x:n.x,y:sy,spouse:true}); out.rendered.add(s.u.spouseId);
+      const upper=Math.min(n.py,sy),lower=Math.max(n.py,sy);
+      out.bars.push({x:n.x+PW/2,y1:upper+PH,y2:lower,uidx,year:(s.u.marriage&&s.u.marriage.y)||null,divorced:!!s.u.divorced});
+      s.u._ay=(pcy+sy+PH/2)/2;
+    }});
+    n.unions.forEach(u=>{ const ay=u.spouseId?u._ay:pcy;
+      u.kids.forEach(k=>out.links.push({x1:n.x+PW,y1:ay,x2:k.x,y2:k.py+PH/2,child:k.pid,uidx:u.idx})); });
+  };
+  place(root,top,0);
+}
+function finalize(out){
+  const xs=out.nodes.map(n=>n.x),ys=out.nodes.map(n=>n.y);
+  return {nodes:out.nodes,bars:out.bars,cbars:out.cbars||[],links:out.links,rendered:out.rendered,
+    minX:xs.length?Math.min(...xs):0, maxX:xs.length?Math.max(...xs)+PW:0, maxY:ys.length?Math.max(...ys)+PH:0,
+    remarriage:out.remarriage, divorce:out.divorce};
+}
+function buildLayout(rootId){                                          // single tree (used for focus/tests)
+  if(!rootId||!G.byId[rootId])return{nodes:[],bars:[],links:[],rendered:new Set(),minX:0,maxX:0,maxY:0,remarriage:false,divorce:false};
+  const out={nodes:[],bars:[],links:[],rendered:new Set(),remarriage:false,divorce:false};
+  const t=makeTree(rootId,new Set()); measure(t); layoutTree(t,0,out); return finalize(out);
+}
+function pickAncFocus(){
+  let best=null,bn=-1; for(const p of state.people){const n=G.upSet(p.id).size; if(n>bn){bn=n;best=p.id;}}
+  return best||(state.people[0]&&state.people[0].id)||null;
+}
+function buildAncestry(focalId){                                      // pedigree: focal on the left, both parents' lines fan right
+  if(!focalId||!G.byId[focalId])return{nodes:[],bars:[],cbars:[],links:[],rendered:new Set(),minX:0,maxX:0,maxY:0,remarriage:false,divorce:false};
+  const seen=new Set();
+  const make=pid=>{ if(seen.has(pid))return{pid,parents:[]}; seen.add(pid); return {pid,parents:G.parentsOf(pid).map(make)}; };
+  const tree=make(focalId);
+  const measure=n=>{ n.parents.forEach(measure); let ph=0; n.parents.forEach((p,i)=>{ph+=p._h;if(i)ph+=VGAP;}); n._h=Math.max(PH,ph); return n._h; };
+  measure(tree);
+  let maxDepth=0; (function dd(n,d){maxDepth=Math.max(maxDepth,d);n.parents.forEach(p=>dd(p,d+1));})(tree,0);
+  const out={nodes:[],bars:[],cbars:[],links:[],rendered:new Set(),remarriage:false,divorce:false};
+  const place=(n,top,depth)=>{
+    n.x=(maxDepth-depth)*COLW;                                        // oldest generation at x=0 (left), focal at right
+    if(!n.parents.length){ n.y=top+(n._h-PH)/2; }
+    else{ let tot=0;n.parents.forEach((p,i)=>{tot+=p._h;if(i)tot+=VGAP;});
+      let py=top+(n._h-tot)/2; n.parents.forEach(p=>{place(p,py,depth+1);py+=p._h+VGAP;});
+      n.y=(n.parents[0].y+n.parents[n.parents.length-1].y)/2; }
+    out.nodes.push({id:n.pid,x:n.x,y:n.y}); out.rendered.add(n.pid);
+    if(n.parents.length){
+      n.parents.forEach(p=>out.links.push({x1:n.x,y1:n.y+PH/2,x2:p.x+PW,y2:p.y+PH/2,child:n.pid,uidx:0}));  // child(left edge) -> parent(right edge, further left)
+      const fam=G.famById[G.childFam[n.pid]];
+      if(fam&&n.parents.length>=2){ const a=n.parents[0],b=n.parents[1];
+        out.cbars.push({x:a.x+PW+15, y1:Math.min(a.y,b.y)+PH/2, y2:Math.max(a.y,b.y)+PH/2, year:(fam.married&&fam.married.y)||null, divorced:!!fam.divorced});
+        if(fam.divorced)out.divorce=true; }
+    }
+  };
+  place(tree,0,0);
+  return finalize(out);
+}
+function buildForest(){                                                // every family line, stacked vertically
+  const out={nodes:[],bars:[],links:[],rendered:new Set(),remarriage:false,divorce:false};
+  const seen=new Set();
+  const roots=state.people.filter(p=>G.parentsOf(p.id).length===0)
+    .sort((a,b)=>G.downSet(b.id).size-G.downSet(a.id).size);          // biggest lines first
+  const TREE_GAP=54; let y=0;
+  for(const r of roots){
+    if(seen.has(r.id)||out.rendered.has(r.id))continue;
+    const t=makeTree(r.id,seen); measure(t); layoutTree(t,y,out); y+=t._h+TREE_GAP;
+  }
+  const left=state.people.filter(p=>!out.rendered.has(p.id));         // stragglers (e.g. some in-laws)
+  if(left.length){ let ly=y+10; left.forEach(p=>{ out.nodes.push({id:p.id,x:0,y:ly,loose:true}); out.rendered.add(p.id); ly+=PH+VGAP; }); }
+  return finalize(out);
+}
+function pickRoot(){
+  let best=null,bn=-1;
+  for(const p of state.people) if(G.parentsOf(p.id).length===0){const n=G.downSet(p.id).size; if(n>bn){bn=n;best=p.id;}}
+  return best||(state.people[0]&&state.people[0].id)||null;
+}
+function getLayout(){
+  if(state.treeMode==="anc" && (!state.ancFocus || !G.byId[state.ancFocus])) state.ancFocus = pickAncFocus();
+  const key = state.treeMode==="anc" ? "anc:"+state.ancFocus : "desc:"+(state.descFocus||"");
+  if(layoutCache.key!==key || !layoutCache.L){
+    layoutCache={key, L: state.treeMode==="anc" ? buildAncestry(state.ancFocus)
+      : (state.descFocus&&G.byId[state.descFocus] ? buildLayout(state.descFocus) : buildForest())};
+  }
+  return layoutCache.L;
+}
+
+/* ---- helpers ---- */
+const $=s=>document.querySelector(s);
+const esc=s=>(s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fullName=p=>p?`${p.given} ${p.surname}`.trim():"Unknown";
+const initials=p=>((p.given[0]||"")+(p.surname[0]||"")).toUpperCase()||"?";
+const lifespan=p=>p?`${p.born&&p.born.y!=null?p.born.y:"?"}\u2013${p.died&&p.died.y!=null?p.died.y:""}`:"";
+const clip=(s,n)=>{s=s||"";return s.length>n?s.slice(0,n-1)+"\u2026":s;};
+const icon=(p,z=16)=>`<svg width="${z}" height="${z}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const ICONS={
+  tree:'<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  map:'<path d="M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15"/>',
+  pin:'<path d="M12 21s7-6.4 7-11a7 7 0 0 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/>',
+  moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>',
+  x:'<path d="M18 6 6 18M6 6l12 12"/>', up:'<path d="M12 19V5M5 12l7-7 7 7"/>',
+  heart:'<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/>',
+  baby:'<circle cx="12" cy="7" r="4"/><path d="M8 21v-1a4 4 0 0 1 8 0v1"/>',
+  users:'<circle cx="9" cy="7" r="4"/><path d="M2 21v-1a6 6 0 0 1 12 0v1M16 3.2a4 4 0 0 1 0 7.6M22 21v-1a6 6 0 0 0-4-5.6"/>',
+  cal:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>', minus:'<path d="M5 12h14"/>',
+  fit:'<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  extents:'<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  start:'<circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/>',
+  center:'<circle cx="12" cy="12" r="8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  upload:'<path d="M12 15V3M8 7l4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+};
+let toastTimer=null;
+function toast(msg,err){const el=$("#toast");el.textContent=msg;el.className=(err?"err ":"")+"show";
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className=el.className.replace("show","").trim(),2600);}
+
+/* ---- render ---- */
+const VIEWS=[["tree","Tree"],["list","People"],["map","Map"]];
+function renderChrome(){
+  $("#tabs").innerHTML=VIEWS.map(([k,l])=>`<button class="tab ${state.view===k?"on":""}" data-act="view" data-view="${k}">${icon(ICONS[k],15)} ${l}</button>`).join("");
+  $("#mnav").innerHTML=VIEWS.map(([k,l])=>`<button class="${state.view===k?"on":""}" data-act="view" data-view="${k}">${icon(ICONS[k],19)}<span>${l}</span></button>`).join("");
+  $("#themeicon").innerHTML=icon(state.theme==="dark"?ICONS.sun:ICONS.moon,16);
+  $("#count").textContent=state.people.length?state.people.length+" people":"";
+}
+function bannerHTML(){
+  if(state.imported||state.bannerOff) return "";
+  return `<div class="banner">${icon(ICONS.upload,14)}<span>Showing a <b>sample</b> family. Tap <b>Open .ged</b> to load your own.</span><button data-act="banner-off">${icon(ICONS.x,15)}</button></div>`;
+}
+function render(){
+  renderChrome();
+  const main=$("#main");
+  if(state.view==="tree") renderTree(main); else if(state.view==="list") renderList(main); else renderMap(main);
+  renderPanel();
+}
+function renderTree(main){
+  const L=getLayout(); lastLayout=L;
+  const line=(state.treeMode!=="anc"&&state.selected)?new Set([state.selected,...G.upSet(state.selected)]):new Set();
+  const nodeSVG=L.nodes.map(n=>{const p=G.byId[n.id];if(!p)return"";
+    const cls="node"+(state.selected===n.id?" sel":line.has(n.id)?" line":""),av=p.sex==="F"?"f":"m";
+    return `<g class="${cls}" data-act="select" data-id="${n.id}" transform="translate(${n.x},${n.y})" style="cursor:pointer">
+      <title>${esc(fullName(p))}</title>
+      <rect width="${PW}" height="${PH}" rx="13"/>
+      <circle class="av-${av}" cx="23" cy="${PH/2}" r="13" stroke-width="1.2"/>
+      <text class="av-${av}-t" x="23" y="${PH/2+4}" text-anchor="middle" font-size="11" font-weight="700">${esc(initials(p))}</text>
+      <text class="nm" x="46" y="27">${esc(clip(p.given,14))}</text>
+      <text class="sn" x="46" y="45">${esc(clip(p.surname,14))}</text>
+      <text class="dt" x="46" y="62">${esc(lifespan(p))}</text></g>`;}).join("");
+  const linkSVG=L.links.map(l=>{const on=line.has(l.child),mx=(l.x1+l.x2)/2;
+    const col=on?"var(--green)":LINK_COLORS[Math.min(l.uidx,LINK_COLORS.length-1)];
+    const w=on?2.8:(l.uidx>=1?1.9:1.6);
+    const dash=(!on&&l.uidx>=1)?` stroke-dasharray="${l.uidx===1?"5 4":"2 4"}"`:"";
+    return `<path d="M${l.x1},${l.y1} H${mx} V${l.y2} H${l.x2}" fill="none" stroke="${col}" stroke-width="${w}"${dash}/>`;}).join("");
+  const barSVG=L.bars.map(b=>{
+    const col=BAR_COLORS[Math.min(b.uidx,BAR_COLORS.length-1)];
+    const my=(b.y1+b.y2)/2, dash=b.uidx>=1?` stroke-dasharray="${b.uidx===1?"5 4":"2 4"}"`:"";
+    let extra="";
+    if(b.uidx>=1) extra+=`<circle cx="${b.x-15}" cy="${my}" r="8.5" fill="var(--panel)" stroke="${col}" stroke-width="1.5"/><text x="${b.x-15}" y="${my+3.5}" text-anchor="middle" font-size="10" font-weight="700" fill="${col}">${b.uidx+1}</text>`;
+    if(b.divorced) extra+=`<g stroke="var(--soft)" stroke-width="1.7"><line x1="${b.x-6}" y1="${my+8}" x2="${b.x+6}" y2="${my-1}"/><line x1="${b.x-6}" y1="${my+4}" x2="${b.x+6}" y2="${my-5}"/></g>`;
+    if(b.year) extra+=`<text x="${b.x+11}" y="${my+3.5}" font-size="9" fill="var(--faint)" style="font-family:var(--mono)">${b.divorced?"\u26AE":"\u26AD"}${b.year}</text>`;
+    return `<line x1="${b.x}" y1="${b.y1}" x2="${b.x}" y2="${b.y2}" stroke="${col}" stroke-width="2"${dash}/>${extra}`;}).join("");
+  const cbarSVG=(L.cbars||[]).map(b=>{const my=(b.y1+b.y2)/2; let e="";
+    if(b.divorced) e+=`<g stroke="var(--soft)" stroke-width="1.7"><line x1="${b.x-6}" y1="${my+8}" x2="${b.x+6}" y2="${my-1}"/><line x1="${b.x-6}" y1="${my+4}" x2="${b.x+6}" y2="${my-5}"/></g>`;
+    if(b.year) e+=`<text x="${b.x-9}" y="${my+3.5}" text-anchor="end" font-size="9" fill="var(--faint)" style="font-family:var(--mono)">${b.divorced?"\u26AE":"\u26AD"}${b.year}</text>`;
+    return `<line x1="${b.x}" y1="${b.y1}" x2="${b.x}" y2="${b.y2}" stroke="var(--soft)" stroke-width="1.6"/>${e}`;}).join("");
+  const focalName=state.treeMode==="anc"&&G.byId[state.ancFocus]?" of "+fullName(G.byId[state.ancFocus]):"";
+  const modeUI=`<div class="tmode">
+    <button data-act="mode" data-mode="anc" class="${state.treeMode==="anc"?"on":""}">Ancestors</button>
+    <button data-act="mode" data-mode="desc" class="${state.treeMode!=="anc"?"on":""}">Descendants</button>
+  </div>${state.treeMode==="anc"?`<div class="focalbar">Ancestors${esc(focalName)}</div>`:""}`;
+  const key=state.showKey?`<div class="tkey"><div class="tkey-h">Marriage key</div>
+    <span><i style="border-color:var(--soft)"></i>1st marriage</span>
+    <span><i style="border-color:var(--brass);border-top-style:dashed"></i>2nd marriage</span>
+    <span><i style="border-color:#B34F4A;border-top-style:dotted"></i>3rd+ marriage</span>
+    <span><svg width="20" height="14" style="overflow:visible"><line x1="10" y1="1" x2="10" y2="13" stroke="var(--soft)" stroke-width="2"/><line x1="5" y1="11" x2="15" y2="3" stroke="var(--soft)" stroke-width="1.6"/><line x1="5" y1="8" x2="15" y2="0" stroke="var(--soft)" stroke-width="1.6"/></svg>divorced</span></div>`:"";
+  main.innerHTML=`${bannerHTML()}<div id="tree"><svg><g id="tg">${linkSVG}${barSVG}${cbarSVG}${nodeSVG}</g></svg>${key}${modeUI}
+    <div class="controls">
+      <button data-act="zoom" data-dir="in" aria-label="Zoom in" title="Zoom in">${icon(ICONS.plus,16)}</button>
+      <button data-act="zoom" data-dir="out" aria-label="Zoom out" title="Zoom out">${icon(ICONS.minus,16)}</button>
+      <button data-act="extents" aria-label="Zoom to extents" title="Zoom to extents (whole tree)">${icon(ICONS.extents,16)}</button>
+      <button data-act="start" aria-label="Zoom to start" title="Zoom to start (top generation)">${icon(ICONS.start,16)}</button>
+      <button data-act="key" aria-label="Marriage key" title="Marriage key">${icon(ICONS.info,16)}</button>
+    </div>
+    <div class="hint">drag to scroll \u00b7 pinch to zoom \u00b7 tap a person</div></div>`;
+  if(state.recenter){ centerInitial(); state.recenter=false; } else { applyPan(); }
+  wireTree();
+}
+function renderList(main){
+  const q=state.query.trim().toLowerCase();
+  const rows=state.people.filter(p=>!q||fullName(p).toLowerCase().includes(q));
+  main.innerHTML=`${bannerHTML()}<div id="list"><div class="list-wrap">${
+    rows.length?rows.map(p=>{const av=p.sex==="F"?"f":"m";
+      return `<button class="person ${state.selected===p.id?"sel":""}" data-act="select" data-id="${p.id}">
+        <div class="avatar ${av}">${esc(initials(p))}</div>
+        <div class="who"><div class="n">${esc(fullName(p))}${p.maiden?` <span style="color:var(--faint);font-weight:400">n\u00e9e ${esc(p.maiden)}</span>`:""}</div>
+        <div class="s">${esc(lifespan(p))}${p.born&&p.born.place?" \u00b7 "+esc(p.born.place):""}</div></div>
+        </button>`;}).join("")
+    :`<div class="empty"><div class="big">${icon(ICONS.upload,24)}</div>No people to show.<br>Tap <b>Open .ged</b> to load a file.</div>`
+  }</div></div>`;
+}
+/* ---- MAP (Leaflet + optional geocoding). Needs an internet connection. ---- */
+/* ---- local gazetteer: match place names to towns/cities offline (no network) ---- */
+let GAZ=null, localDone=false;
+function foldName(s){return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9 ]/g,"").trim();}
+function buildGaz(){
+  if(GAZ||!window.GAZ_RAW) return GAZ;
+  GAZ=new Map(); const rows=window.GAZ_RAW.split("\n");
+  for(let i=0;i<rows.length;i++){const r=rows[i];if(!r)continue;const t=r.split("\t");
+    const rec={lat:+t[1],lon:+t[2],cc:t[3],a1:t[4]||""};
+    const a=GAZ.get(t[0]); if(a)a.push(rec); else GAZ.set(t[0],[rec]); }
+  return GAZ;
+}
+function localGeocode(place){                                 // returns {lat,lon} or null
+  const g=buildGaz(); if(!g) return null;
+  const parts=(place||"").split(",").map(foldName).filter(Boolean); if(!parts.length) return null;
+  const cands=g.get(parts[0]); if(!cands) return null;
+  if(cands.length===1) return {lat:cands[0].lat,lon:cands[0].lon};
+  const rest=parts.slice(1);
+  for(const t of rest){ const st=window.US_STATE&&window.US_STATE[t];               // e.g. "Springfield, Illinois"
+    if(st){const f=cands.filter(c=>c.cc==="us"&&c.a1===st); if(f.length) return {lat:f[0].lat,lon:f[0].lon};} }
+  for(const t of rest){ const cc=window.CC_ALIAS&&window.CC_ALIAS[t];               // e.g. "Perth, Scotland"
+    if(cc){const f=cands.filter(c=>c.cc===cc); if(f.length) return {lat:f[0].lat,lon:f[0].lon};} }
+  return {lat:cands[0].lat,lon:cands[0].lon};                  // else most-populous (list is pop-sorted)
+}
+function applyLocalGeo(){                                      // fill coords for every place we can match locally
+  if(localDone) return; localDone=true;
+  state.people.forEach(p=>["born","died"].forEach(k=>{const e=p[k];
+    if(e&&e.place&&e.lat==null){const g=localGeocode(e.place); if(g){e.lat=g.lat;e.lon=g.lon;e.approx=true;}}}));
+}
+function ensureLeaflet(cb){
+  if(window.L){cb();return;}
+  const done=$("#leaflet-js");
+  if(done){done.addEventListener("load",()=>cb());done.addEventListener("error",()=>cb(new Error("offline")));return;}
+  const css=document.createElement("link");css.rel="stylesheet";css.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";document.head.appendChild(css);
+  const s=document.createElement("script");s.id="leaflet-js";s.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+  s.onload=()=>cb();s.onerror=()=>cb(new Error("offline"));document.head.appendChild(s);
+}
+function cssVar(n,f){const v=getComputedStyle(document.documentElement).getPropertyValue(n).trim();return v||f;}
+function mapEvents(){
+  const ev=[]; state.people.forEach(p=>["born","died"].forEach(k=>{const e=p[k];
+    if(e&&e.lat!=null&&e.lon!=null&&isFinite(e.lat)&&isFinite(e.lon)) ev.push({id:p.id,kind:k,y:e.y,lat:e.lat,lon:e.lon,place:e.place,p});})); return ev;
+}
+function placesNeeding(){
+  const q=state.query.trim().toLowerCase();
+  const s=new Set(); state.people.forEach(p=>{ if(q&&!fullName(p).toLowerCase().includes(q))return;
+    ["born","died"].forEach(k=>{const e=p[k]; if(e&&e.place&&e.lat==null&&!(e.place in geoCache)) s.add(e.place);}); }); return [...s];
+}
+function applyGeocache(){ state.people.forEach(p=>["born","died"].forEach(k=>{const e=p[k];
+  if(e&&e.place&&e.lat==null){const c=geoCache[e.place]; if(c&&!c.nf){e.lat=c.lat;e.lon=c.lon;}}})); }
+function yearBounds(){
+  let lo=Infinity,hi=-Infinity;
+  state.people.forEach(p=>["born","died"].forEach(k=>{const y=p[k]&&p[k].y; if(y!=null){if(y<lo)lo=y;if(y>hi)hi=y;}}));
+  if(!isFinite(lo)){lo=1500;hi=2025;}
+  return {lo:Math.floor(lo/10)*10, hi:Math.ceil(hi/10)*10};
+}
+function renderMap(main){
+  applyLocalGeo();
+  const q=state.query.trim().toLowerCase();
+  const ev=mapEvents().filter(e=>!q||fullName(e.p).toLowerCase().includes(q)), need=placesNeeding(), b=yearBounds();
+  if(state.yearFrom==null||state.yearFrom<b.lo||state.yearFrom>b.hi) state.yearFrom=b.lo;
+  if(state.yearTo==null||state.yearTo>b.hi||state.yearTo<b.lo) state.yearTo=b.hi;
+  main.innerHTML=`<div id="mapwrap">
+    <div class="map-top">
+      <button class="btn ghost" data-act="geocode" id="geo-btn">${icon(ICONS.pin,15)} Find places</button>
+      <span class="map-status" id="geo-status">${ev.length?ev.length+" located":""}${need.length?" \u00b7 "+need.length+" to find":""}</span>
+    </div>
+    <div id="lmap"></div>
+    <div id="map-msg" class="map-msg" style="display:none"></div>
+    <div class="slider-wrap">
+      <div class="slider-head"><span style="color:var(--soft);font-size:12px;font-weight:500">Year range</span><span class="yr" id="yrlab">${state.yearFrom}\u2013${state.yearTo}</span></div>
+      <label class="rng"><span>From</span><input type="range" id="yrFrom" min="${b.lo}" max="${b.hi}" value="${state.yearFrom}"/></label>
+      <label class="rng"><span>To</span><input type="range" id="yrTo" min="${b.lo}" max="${b.hi}" value="${state.yearTo}"/></label>
+      <div class="ticks"><span>${b.lo}</span><span>${Math.round((b.lo+b.hi)/2)}</span><span>${b.hi}</span></div>
+    </div></div>`;
+  ensureLeaflet(err=>{ if(err||!window.L){ const m=$("#map-msg"); if(m){m.textContent="A map needs an internet connection. Connect, then reopen this tab.";m.style.display="block";} return; } initMap(); });
+  renderPanel();
+}
+function initMap(){
+  const div=$("#lmap"); if(!div||!window.L) return;
+  if(mapObj){try{mapObj.remove();}catch(e){}}
+  mapObj=L.map(div,{worldCopyJump:true}).setView([20,0],2);
+  const style=state.theme==="dark"?"dark_all":"light_all";
+  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`,
+    {maxZoom:19,subdomains:"abcd",attribution:"\u00a9 OpenStreetMap \u00b7 \u00a9 CARTO"}).addTo(mapObj);
+  markersLayer=L.layerGroup().addTo(mapObj);
+  updateMapMarkers(true);
+}
+function loadGeo(){ try{const s=localStorage.getItem("gv_geo"); if(s) geoCache=JSON.parse(s)||{};}catch(e){} }
+function saveGeo(){ try{localStorage.setItem("gv_geo",JSON.stringify(geoCache));}catch(e){} }
+function updateMapMarkers(fit){
+  const yl=$("#yrlab"); if(yl)yl.textContent=state.yearFrom+"\u2013"+state.yearTo;
+  if(!markersLayer||!window.L) return;
+  markersLayer.clearLayers();
+  const green=cssVar("--green","#24529A"), brass=cssVar("--brass","#D87822");
+  const q=state.query.trim().toLowerCase();
+  const evs=mapEvents().filter(e=>e.y!=null&&e.y>=state.yearFrom&&e.y<=state.yearTo&&(!q||fullName(e.p).toLowerCase().includes(q))), pts=[];
+  evs.forEach(e=>{ const col=e.kind==="born"?green:brass;
+    const m=L.circleMarker([e.lat,e.lon],{radius:6,color:col,weight:2,fillColor:col,fillOpacity:e.kind==="born"?0.85:0.15});
+    m.bindPopup(`<b>${esc(fullName(e.p))}</b><br>${e.kind==="born"?"Born":"Died"} ${e.y||""}${e.place?"<br>"+esc(e.place):""}`);
+    m.on("click",()=>{state.selected=e.id;renderPanel();});
+    m.addTo(markersLayer); pts.push([e.lat,e.lon]); });
+  if(fit&&pts.length){ try{mapObj.fitBounds(pts,{padding:[30,30],maxZoom:9});}catch(e){} }
+}
+async function geocodePlaces(){
+  if(!window.L){toast("Open the map first (needs internet)",true);return;}
+  const btn=$("#geo-btn"), status=$("#geo-status"), list=placesNeeding();
+  if(!list.length){ if(status)status.textContent="All places located"; updateMapMarkers(true); return; }
+  if(btn)btn.disabled=true;
+  for(let i=0;i<list.length;i++){ const place=list[i];
+    if(status)status.textContent=`Locating ${i+1}/${list.length}\u2026`;
+    try{ const r=await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(place),{headers:{Accept:"application/json"}});
+      const j=await r.json();
+      if(j&&j[0]){geoCache[place]={lat:+j[0].lat,lon:+j[0].lon};} else{geoCache[place]={nf:true};}
+      saveGeo(); }catch(e){}
+    applyGeocache(); updateMapMarkers(i===0);
+    await new Promise(res=>setTimeout(res,1100)); // respect OSM ~1 req/sec
+  }
+  applyGeocache(); updateMapMarkers(true);
+  if(status)status.textContent=`Located ${mapEvents().length} events`;
+  if(btn)btn.disabled=false;
+}
+
+function relGroup(label,ic,ids){ if(!ids.length)return"";
+  return `<div class="rel-group"><div class="rel-label">${icon(ic,12)} ${label}</div>
+    <div class="chips">${ids.map(id=>`<button class="chip" data-act="select" data-id="${id}">${esc(fullName(G.byId[id]))}</button>`).join("")}</div></div>`;}
+function syncScrim(){const s=$("#scrim");if(s)s.classList.toggle("on",($("#panel").className||"").indexOf("hidden")<0);}
+function renderPanel(){ _renderPanel(); syncScrim(); }
+function _renderPanel(){
+  const panel=$("#panel");
+  if(state.view==="map"){                              // on the map, the panel is only used for search results
+    if(!state.query.trim()){ panel.className="hidden"; panel.innerHTML=""; return; }
+    const q=state.query.trim().toLowerCase();
+    const matches=state.people.filter(p=>fullName(p).toLowerCase().includes(q));
+    const fmt=e=>`${e&&e.y!=null?e.y:"?"}${e&&e.place?" \u00b7 "+esc(e.place):""}`;
+    panel.className="";
+    panel.innerHTML=`<div class="grip"></div>
+      <div class="p-head" style="padding-bottom:10px">
+        <div style="flex:1;min-width:0"><h2 style="font-size:18px">${matches.length} result${matches.length===1?"":"s"}</h2>
+          <div class="p-sub">for \u201c${esc(state.query.trim())}\u201d</div></div>
+        <button class="close" data-act="clearsearch">${icon(ICONS.x,18)}</button></div>
+      <div class="p-body">${
+        matches.length? matches.map(p=>`<button class="mr-row" data-act="mapfocus" data-id="${p.id}">
+          <div class="mr-name">${esc(fullName(p))}${p.maiden?` <span style="color:var(--faint);font-weight:400">n\u00e9e ${esc(p.maiden)}</span>`:""}</div>
+          ${p.born?`<div class="mr-fact"><span>b.</span>${fmt(p.born)}</div>`:""}
+          ${p.died?`<div class="mr-fact"><span>d.</span>${fmt(p.died)}</div>`:""}
+        </button>`).join("") : `<div class="mr-empty">No one by that name.</div>`
+      }</div>`;
+    return;
+  }
+  const p=G.byId[state.selected];
+  if(!p){panel.className="hidden";panel.innerHTML="";return;}
+  panel.className="";
+  const av=p.sex==="F"?"f":"m";
+  panel.innerHTML=`<div class="grip"></div>
+  <div class="p-head"><div class="avatar ${av}">${esc(initials(p))}</div>
+    <div style="flex:1;min-width:0"><h2>${esc(fullName(p))}</h2>
+      ${p.maiden?`<div class="p-sub">n\u00e9e ${esc(p.maiden)}</div>`:""}<div class="p-life">${esc(lifespan(p))}</div></div>
+    <button class="close" data-act="close">${icon(ICONS.x,18)}</button></div>
+  <div class="p-body">
+    ${p.born?`<div class="fact"><span style="color:var(--faint)">${icon(ICONS.cal,14)}</span><span class="lab">Born</span><span class="val">${esc((p.born.y!=null?p.born.y:"?")+(p.born.place?" \u00b7 "+p.born.place:""))}</span></div>`:""}
+    ${p.died?`<div class="fact"><span style="color:var(--faint)">${icon(ICONS.cal,14)}</span><span class="lab">Died</span><span class="val">${esc((p.died.y!=null?p.died.y:"?")+(p.died.place?" \u00b7 "+p.died.place:""))}</span></div>`:""}
+    ${relGroup("Parents",ICONS.up,G.parentsOf(p.id))}
+    ${relGroup("Partners",ICONS.heart,G.spousesOf(p.id))}
+    ${relGroup("Siblings",ICONS.users,G.siblingsOf(p.id))}
+    ${relGroup("Children",ICONS.baby,G.childrenOf(p.id))}
+  </div>
+  <div class="p-foot"><button class="btn" data-act="anc-focus">${icon(ICONS.up,15)} Ancestors</button><button class="btn" data-act="desc-focus">${icon(ICONS.baby,15)} Descendants</button><button class="btn" data-act="tomap" style="grid-column:1/-1">${icon(ICONS.map,15)} Show ${esc(p.surname||p.given)} on map</button></div>`;
+}
+
+/* ---- tree pan / pinch-zoom ---- */
+function applyPan(){const g=$("#tg");if(g)g.setAttribute("transform",`translate(${pan.x},${pan.y}) scale(${pan.s})`);}
+function zoomAround(cx,cy,f){const ns=Math.min(3,Math.max(0.2,pan.s*f)),k=ns/pan.s;pan.x=cx-(cx-pan.x)*k;pan.y=cy-(cy-pan.y)*k;pan.s=ns;applyPan();}
+function fitTree(){const el=$("#tree");if(!el)return;const w=el.clientWidth||360,h=el.clientHeight||480,L=lastLayout;
+  const tw=(L.maxX-L.minX)||1,th=(L.maxY)||1,s=Math.min(1,(w-40)/tw,(h-40)/th);
+  pan={s,x:(w-tw*s)/2-L.minX*s,y:Math.max(16,(h-th*s)/2)};applyPan();}
+function centerInitial(){const el=$("#tree");if(!el)return;const w=el.clientWidth||360,h=el.clientHeight||480,L=lastLayout;
+  if(!L.nodes.length)return;const tw=(L.maxX-L.minX)||1,th=(L.maxY)||1,fitS=Math.min((w-40)/tw,(h-40)/th);
+  if(fitS>=0.5){const s=Math.min(1,fitS);pan={s,x:(w-tw*s)/2-L.minX*s,y:Math.max(16,(h-th*s)/2)};}
+  else{const focal=state.treeMode==="anc"?state.ancFocus:state.root;const id=L.nodes.find(n=>n.id===state.selected)?state.selected:focal;const n=L.nodes.find(n=>n.id===id)||L.nodes[0];const s=0.85;
+    if(state.treeMode==="anc") pan={s,x:w-40-(n.x+PW)*s,y:h/2-(n.y+PH/2)*s};   // focal near right, ancestors fan left
+    else pan={s,x:32-n.x*s,y:h/2-(n.y+PH/2)*s};}                                 // root near left
+  applyPan();}
+function centerStart(){const el=$("#tree");if(!el)return;const w=el.clientWidth||360,h=el.clientHeight||480,L=lastLayout;
+  const target=state.treeMode==="anc"?state.ancFocus:state.root;
+  const n=L.nodes.find(x=>x.id===target)||L.nodes[0];if(!n)return;const s=0.9;
+  if(state.treeMode==="anc") pan={s,x:w-40-(n.x+PW)*s,y:h/2-(n.y+PH/2)*s};
+  else pan={s,x:32-n.x*s,y:h/2-(n.y+PH/2)*s};
+  applyPan();}
+function centerNode(id,s){const el=$("#tree");if(!el)return;const w=el.clientWidth||360,h=el.clientHeight||480,L=lastLayout;
+  const n=L.nodes.find(x=>x.id===id)||L.nodes[0];if(!n)return;s=s||0.95;
+  pan={s,x:w/2-(n.x+PW/2)*s,y:h/2-(n.y+PH/2)*s};applyPan();}
+const tdist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+const tmid=t=>({x:(t[0].clientX+t[1].clientX)/2,y:(t[0].clientY+t[1].clientY)/2});
+function wireTree(){
+  const el=$("#tree");if(!el)return;let drag=null,moved=false,pinch=null;
+  const rect=()=>el.getBoundingClientRect();
+  const down=e=>{ if(e.touches&&e.touches.length===2){const r=rect(),m=tmid(e.touches);pinch={d:tdist(e.touches),mx:m.x-r.left,my:m.y-r.top};drag=null;return;}
+    const t=e.touches?e.touches[0]:e;drag={x:t.clientX-pan.x,y:t.clientY-pan.y};moved=false;};
+  const move=e=>{
+    if(pinch&&e.touches&&e.touches.length===2){e.preventDefault();const r=rect(),d=tdist(e.touches),m=tmid(e.touches),cx=m.x-r.left,cy=m.y-r.top;
+      zoomAround(cx,cy,d/pinch.d);pan.x+=cx-pinch.mx;pan.y+=cy-pinch.my;applyPan();pinch={d,mx:cx,my:cy};moved=true;return;}
+    if(!drag)return;const t=e.touches?e.touches[0]:e;pan.x=t.clientX-drag.x;pan.y=t.clientY-drag.y;moved=true;applyPan();};
+  const up=e=>{if(e.touches&&e.touches.length>0)return;drag=null;pinch=null;};
+  el.addEventListener("mousedown",down);el.addEventListener("mousemove",move);window.addEventListener("mouseup",up);
+  el.addEventListener("touchstart",down,{passive:false});el.addEventListener("touchmove",move,{passive:false});el.addEventListener("touchend",up);
+  el.addEventListener("wheel",e=>{e.preventDefault();const r=rect();zoomAround(e.clientX-r.left,e.clientY-r.top,e.deltaY<0?1.1:0.9);},{passive:false});
+  el.addEventListener("click",e=>{if(moved){e.stopPropagation();e.preventDefault();}},true);
+}
+function zoomBtn(f){const el=$("#tree");if(!el)return;zoomAround((el.clientWidth||360)/2,(el.clientHeight||480)/2,f);}
+
+/* ---- data + events ---- */
+function rebuild(){G=buildGraph(state.people,state.fams);layoutCache={key:null,L:null};}
+function setData(people,fams){state.people=people;state.fams=fams;rebuild();state.root=pickRoot();localDone=false;
+  state.descFocus=null;state.ancFocus=pickAncFocus();applyGeocache();
+  if(!G.byId[state.selected])state.selected=state.root;state.recenter=true;render();}
+
+document.addEventListener("click",e=>{
+  const el=e.target.closest("[data-act]");if(!el)return;const act=el.dataset.act;
+  if(act==="view"){ if(state.view==="map"&&el.dataset.view!=="map"&&mapObj){try{mapObj.remove();}catch(e){}mapObj=null;markersLayer=null;}
+    state.view=el.dataset.view;if(state.view==="tree")state.recenter=true;render();}
+  else if(act==="select"){state.selected=el.dataset.id;render();}
+  else if(act==="theme"){state.theme=state.theme==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",state.theme);renderChrome();}
+  else if(act==="open"){$("#file").click();}
+  else if(act==="banner-off"){state.bannerOff=true;render();}
+  else if(act==="close"){$("#panel").className="hidden";syncScrim();}
+  else if(act==="scrim-close"){ if(state.view==="map"){state.query="";const s=$("#search");if(s)s.value="";renderPanel();updateMapMarkers(true);} else {$("#panel").className="hidden";syncScrim();} }
+  else if(act==="focus"){state.view="tree";render();centerNode(state.selected,0.95);}
+  else if(act==="mode"){const m=el.dataset.mode; if(m!==state.treeMode){ state.treeMode=m;
+    if(m==="anc"){ if(state.selected&&G.byId[state.selected])state.ancFocus=state.selected; else if(!state.ancFocus)state.ancFocus=pickAncFocus(); }
+    else{ state.descFocus=null; } state.recenter=true; render(); } }
+  else if(act==="anc-focus"){state.treeMode="anc";state.ancFocus=state.selected;state.view="tree";state.recenter=true;render();}
+  else if(act==="desc-focus"){state.treeMode="desc";state.descFocus=state.selected;state.view="tree";state.recenter=true;render();}
+  else if(act==="zoom"){zoomBtn(el.dataset.dir==="in"?1.25:0.8);}
+  else if(act==="extents"){fitTree();}
+  else if(act==="start"){centerStart();}
+  else if(act==="key"){state.showKey=!state.showKey;render();}
+  else if(act==="geocode"){geocodePlaces();}
+  else if(act==="clearsearch"){state.query="";const s=$("#search");if(s)s.value="";renderPanel();if(state.view==="map")updateMapMarkers(true);}
+  else if(act==="tomap"){ const p=G.byId[state.selected]; if(!p)return;
+    state.query=(p.surname&&p.surname.trim())?p.surname.trim():fullName(p);
+    state.view="map"; state.yearFrom=null; state.yearTo=null;
+    const s=$("#search"); if(s)s.value=state.query; render(); }
+  else if(act==="mapfocus"){ const id=el.dataset.id; state.selected=id; const p=G.byId[id];
+    const e=(p.born&&p.born.lat!=null)?p.born:((p.died&&p.died.lat!=null)?p.died:null);
+    if(e&&mapObj&&window.L){ mapObj.setView([e.lat,e.lon],9); updateMapMarkers(false);
+      let hit=null; markersLayer.eachLayer(l=>{const ll=l.getLatLng&&l.getLatLng(); if(ll&&Math.abs(ll.lat-e.lat)<1e-6&&Math.abs(ll.lng-e.lon)<1e-6)hit=l;}); if(hit&&hit.openPopup)hit.openPopup(); }
+    else if(!e){ toast("Tap \u201cFind places\u201d to map this person",true); } }
+});
+document.addEventListener("input",e=>{
+  if(e.target.id==="search"){state.query=e.target.value;
+    if(state.view==="list")renderList($("#main"));
+    else if(state.view==="map"){renderPanel();updateMapMarkers(true);}
+    else{const q=state.query.trim().toLowerCase();const hit=state.people.find(p=>q&&fullName(p).toLowerCase().includes(q));
+      if(hit){state.selected=hit.id;renderPanel();}}}
+  else if(e.target.id==="yrFrom"){ state.yearFrom=+e.target.value; if(state.yearFrom>state.yearTo){state.yearTo=state.yearFrom;const t=$("#yrTo");if(t)t.value=state.yearTo;} updateMapMarkers(false); }
+  else if(e.target.id==="yrTo"){ state.yearTo=+e.target.value; if(state.yearTo<state.yearFrom){state.yearFrom=state.yearTo;const f=$("#yrFrom");if(f)f.value=state.yearFrom;} updateMapMarkers(false); }
+});
+function decodeBuffer(buf){                                   // handle UTF-8 / UTF-16 GEDCOM exports, with or without BOM
+  const b=new Uint8Array(buf); let label="utf-8";
+  if(b.length>=3&&b[0]===0xEF&&b[1]===0xBB&&b[2]===0xBF) label="utf-8";
+  else if(b.length>=2&&b[0]===0xFF&&b[1]===0xFE) label="utf-16le";
+  else if(b.length>=2&&b[0]===0xFE&&b[1]===0xFF) label="utf-16be";
+  else{ let z=0,odd=0,even=0,lim=Math.min(b.length,4000);        // no BOM: sniff for UTF-16 by its null bytes
+    for(let i=0;i<lim;i++){ if(b[i]===0){z++; (i&1)?odd++:even++;} }
+    if(z>lim*0.15) label = even>odd ? "utf-16be" : "utf-16le"; }
+  try{ return new TextDecoder(label).decode(buf); }catch(e){ try{return new TextDecoder("utf-8").decode(buf);}catch(_){return "";} }
+}
+$("#file").addEventListener("change",ev=>{
+  const f=ev.target.files[0];if(!f)return;const reader=new FileReader();
+  reader.onload=()=>{try{
+    const text=(reader.result instanceof ArrayBuffer)?decodeBuffer(reader.result):String(reader.result);
+    const {people,fams}=parseGEDCOM(text);
+    if(!people.length){toast("No individuals found \u2014 is this a GEDCOM (.ged) file? If it came in a .zip, unzip it first.",true);return;}
+    state.imported=true;state.selected=null;setData(people,fams);
+    toast(`Loaded ${people.length} people \u00b7 ${fams.length} families`);
+  }catch(err){console.error(err);toast("Couldn't read that file",true);}};
+  reader.onerror=()=>toast("Couldn't read that file",true);
+  if(typeof TextDecoder!=="undefined") reader.readAsArrayBuffer(f); else reader.readAsText(f);
+  ev.target.value="";
+});
+window.addEventListener("resize",()=>{if(state.view==="tree")centerInitial();});
+
+/* ---- init ---- */
+function init(){loadGeo();setData(SAMPLE_PEOPLE.map(p=>({...p})),SAMPLE_FAMS.map(f=>({...f,partners:[...f.partners],children:[...f.children]})));state.selected=null;renderPanel();}
+init();
+window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,decodeBuffer,localGeocode,get G(){return G;}};
+</script>
+</body>
+</html>
