@@ -542,9 +542,23 @@ function renderTree(main){
   if(state.recenter){ centerInitial(); state.recenter=false; } else { applyPan(); }
   wireTree();
 }
+function searchScore(p,q){                        // lower is better; -1 = no match
+  if(!q) return 0;
+  const given=(p.given||"").toLowerCase(), surname=(p.surname||"").toLowerCase(), full=fullName(p).toLowerCase();
+  if(given===q||surname===q||full===q) return 0;        // exact match
+  if(given.startsWith(q)||surname.startsWith(q)) return 1; // name starts with query
+  if(full.split(/\s+/).some(w=>w.startsWith(q))) return 2; // any word starts with query
+  if(full.includes(q)) return 3;                          // buried substring match
+  return -1;
+}
+function searchPeople(list,q){
+  if(!q) return list.slice();
+  return list.map(p=>({p,s:searchScore(p,q)})).filter(x=>x.s>=0)
+    .sort((a,b)=>a.s-b.s||fullName(a.p).localeCompare(fullName(b.p))).map(x=>x.p);
+}
 function renderList(main){
   const q=state.query.trim().toLowerCase();
-  const rows=state.people.filter(p=>!q||fullName(p).toLowerCase().includes(q));
+  const rows=searchPeople(state.people,q);
   main.innerHTML=`${bannerHTML()}<div id="list"><div class="list-wrap">${
     rows.length?rows.map(p=>{const av=p.sex==="F"?"f":"m";
       return `<button class="person ${state.selected===p.id?"sel":""}" data-act="select" data-id="${p.id}">
@@ -599,7 +613,7 @@ function mapEvents(){
 }
 function placesNeeding(){
   const q=state.query.trim().toLowerCase();
-  const s=new Set(); state.people.forEach(p=>{ if(q&&!fullName(p).toLowerCase().includes(q))return;
+  const s=new Set(); state.people.forEach(p=>{ if(q&&searchScore(p,q)<0)return;
     ["born","died"].forEach(k=>{const e=p[k]; if(e&&e.place&&e.lat==null&&!(e.place in geoCache)) s.add(e.place);}); }); return [...s];
 }
 function applyGeocache(){ state.people.forEach(p=>["born","died"].forEach(k=>{const e=p[k];
@@ -613,7 +627,7 @@ function yearBounds(){
 function renderMap(main){
   applyLocalGeo();
   const q=state.query.trim().toLowerCase();
-  const ev=mapEvents().filter(e=>!q||fullName(e.p).toLowerCase().includes(q)), need=placesNeeding(), b=yearBounds();
+  const ev=mapEvents().filter(e=>!q||searchScore(e.p,q)>=0), need=placesNeeding(), b=yearBounds();
   if(state.yearFrom==null||state.yearFrom<b.lo||state.yearFrom>b.hi) state.yearFrom=b.lo;
   if(state.yearTo==null||state.yearTo>b.hi||state.yearTo<b.lo) state.yearTo=b.hi;
   main.innerHTML=`<div id="mapwrap">
@@ -650,7 +664,7 @@ function updateMapMarkers(fit){
   markersLayer.clearLayers();
   const green=cssVar("--green","#24529A"), brass=cssVar("--brass","#D87822");
   const q=state.query.trim().toLowerCase();
-  const evs=mapEvents().filter(e=>e.y!=null&&e.y>=state.yearFrom&&e.y<=state.yearTo&&(!q||fullName(e.p).toLowerCase().includes(q))), pts=[];
+  const evs=mapEvents().filter(e=>e.y!=null&&e.y>=state.yearFrom&&e.y<=state.yearTo&&(!q||searchScore(e.p,q)>=0)), pts=[];
   evs.forEach(e=>{ const col=e.kind==="born"?green:brass;
     const m=L.circleMarker([e.lat,e.lon],{radius:6,color:col,weight:2,fillColor:col,fillOpacity:e.kind==="born"?0.85:0.15});
     m.bindPopup(`<b>${esc(fullName(e.p))}</b><br>${e.kind==="born"?"Born":"Died"} ${e.y||""}${e.place?"<br>"+esc(e.place):""}`);
@@ -687,7 +701,7 @@ function _renderPanel(){
   if(state.view==="map"){                              // on the map, the panel is only used for search results
     if(!state.query.trim()){ panel.className="hidden"; panel.innerHTML=""; return; }
     const q=state.query.trim().toLowerCase();
-    const matches=state.people.filter(p=>fullName(p).toLowerCase().includes(q));
+    const matches=searchPeople(state.people,q);
     const fmt=e=>`${e&&e.y!=null?e.y:"?"}${e&&e.place?" \u00b7 "+esc(e.place):""}`;
     panel.className="";
     panel.innerHTML=`<div class="grip"></div>
@@ -807,8 +821,8 @@ document.addEventListener("input",e=>{
   if(e.target.id==="search"){state.query=e.target.value;
     if(state.view==="list")renderList($("#main"));
     else if(state.view==="map"){renderPanel();updateMapMarkers(true);}
-    else{const q=state.query.trim().toLowerCase();const hit=state.people.find(p=>q&&fullName(p).toLowerCase().includes(q));
-      if(hit){state.selected=hit.id;renderPanel();}}}
+    else{const q=state.query.trim().toLowerCase();const best=q?searchPeople(state.people,q)[0]:null;
+      if(best){state.selected=best.id;renderPanel();}}}
   else if(e.target.id==="yrFrom"){ state.yearFrom=+e.target.value; if(state.yearFrom>state.yearTo){state.yearTo=state.yearFrom;const t=$("#yrTo");if(t)t.value=state.yearTo;} updateMapMarkers(false); }
   else if(e.target.id==="yrTo"){ state.yearTo=+e.target.value; if(state.yearTo<state.yearFrom){state.yearFrom=state.yearTo;const f=$("#yrFrom");if(f)f.value=state.yearFrom;} updateMapMarkers(false); }
 });
@@ -829,6 +843,7 @@ $("#file").addEventListener("change",ev=>{
     const {people,fams}=parseGEDCOM(text);
     if(!people.length){toast("No individuals found \u2014 is this a GEDCOM (.ged) file? If it came in a .zip, unzip it first.",true);return;}
     state.imported=true;state.selected=null;setData(people,fams);
+    saveLastGed(text,f.name);
     toast(`Loaded ${people.length} people \u00b7 ${fams.length} families`);
   }catch(err){console.error(err);toast("Couldn't read that file",true);}};
   reader.onerror=()=>toast("Couldn't read that file",true);
@@ -837,10 +852,33 @@ $("#file").addEventListener("change",ev=>{
 });
 window.addEventListener("resize",()=>{if(state.view==="tree")centerInitial();});
 
+function saveLastGed(text,filename){
+  try{ localStorage.setItem("gv_last_ged",text); localStorage.setItem("gv_last_ged_name",filename||""); }
+  catch(e){ console.warn("Could not save file for next time (storage full?)",e); }
+}
+function loadLastGed(){
+  try{ const text=localStorage.getItem("gv_last_ged"); const name=localStorage.getItem("gv_last_ged_name")||"";
+    return text ? {text,name} : null; }
+  catch(e){ return null; }
+}
+function clearLastGed(){ try{ localStorage.removeItem("gv_last_ged"); localStorage.removeItem("gv_last_ged_name"); }catch(e){} }
+
 /* ---- init ---- */
-function init(){loadGeo();setData(SAMPLE_PEOPLE.map(p=>({...p})),SAMPLE_FAMS.map(f=>({...f,partners:[...f.partners],children:[...f.children]})));state.selected=null;renderPanel();}
+function init(){
+  loadGeo();
+  const saved=loadLastGed();
+  if(saved){
+    try{
+      const {people,fams}=parseGEDCOM(saved.text);
+      if(people.length){ state.imported=true; setData(people,fams); state.selected=null; renderPanel();
+        toast(`Restored ${saved.name||"your last file"} \u00b7 ${people.length} people`); return; }
+    }catch(e){ console.warn("Could not restore last file",e); }
+  }
+  setData(SAMPLE_PEOPLE.map(p=>({...p})),SAMPLE_FAMS.map(f=>({...f,partners:[...f.partners],children:[...f.children]})));
+  state.selected=null;renderPanel();
+}
 init();
-window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,decodeBuffer,localGeocode,get G(){return G;}};
+window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,decodeBuffer,localGeocode,searchPeople,searchScore,saveLastGed,loadLastGed,clearLastGed,get G(){return G;}};
 </script>
 </body>
 </html>
