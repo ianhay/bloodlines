@@ -63,7 +63,7 @@ header{display:flex;align-items:center;gap:8px;min-height:56px;padding:0 10px;pa
 .hide-mobile{display:flex}
 
 .body{flex:1;display:flex;min-height:0;position:relative}
-main{flex:1;min-width:0;position:relative}
+main{flex:1;min-width:0;position:relative;z-index:0}
 
 .banner{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;gap:8px;
   padding:8px 12px;font-size:12.5px;background:var(--brass-soft);color:#8a4d10}
@@ -130,7 +130,7 @@ main{flex:1;min-width:0;position:relative}
 .p-head h2{margin:0;font-size:20px;letter-spacing:-.01em;line-height:1.15}
 .p-sub{font-size:13px;color:var(--soft)} .p-life{font:13px var(--mono);color:var(--soft);margin-top:2px}
 .grip{width:40px;height:4px;border-radius:4px;background:var(--line);margin:8px auto 2px;display:none}
-.p-body{flex:1;overflow-y:auto;padding:0 16px 12px}
+.p-body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 16px 12px}
 .fact{display:flex;align-items:center;gap:8px;font-size:13px;margin:4px 0}
 .fact .lab{width:38px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:600;color:var(--faint)}
 .fact .val{font:13px var(--mono);color:var(--text)}
@@ -263,7 +263,7 @@ const SAMPLE_FAMS=[
 
 const state={people:[],fams:[],theme:"light",view:"tree",treeMode:"anc",ancFocus:null,descFocus:null,selected:null,root:null,query:"",imported:false,bannerOff:false,showKey:false,yearFrom:null,yearTo:null};
 let G=null, pan={x:40,y:40,s:1}, lastLayout={minX:0,maxX:0,maxY:0}, layoutCache={root:null,L:null};
-let mapObj=null, markersLayer=null, geoCache={};
+let mapObj=null, markersLayer=null, tileLayer=null, geoCache={};
 
 /* ---- GEDCOM parser (common 5.5.1 / 7.0 shape) ---- */
 function parseGEDCOM(text){
@@ -550,9 +550,10 @@ function renderTree(main){
 function searchScore(p,q){                        // lower is better; -1 = no match
   if(!q) return 0;
   const given=(p.given||"").toLowerCase(), surname=(p.surname||"").toLowerCase(), full=fullName(p).toLowerCase();
-  if(given===q||surname===q||full===q) return 0;        // exact match
-  if(given.startsWith(q)||surname.startsWith(q)) return 1; // name starts with query
-  if(full.split(/\s+/).some(w=>w.startsWith(q))) return 2; // any word starts with query
+  if(full===q) return 0;                                  // exact full-name match
+  const qWords=q.split(/\s+/).filter(Boolean), nameWords=[given,surname].filter(Boolean);
+  if(qWords.length&&qWords.every(qw=>nameWords.some(nw=>nw.startsWith(qw)))) return 1; // every query word prefixes a name part (handles "ian" and "ian hay" alike)
+  if(full.split(/\s+/).some(w=>w.startsWith(q))) return 2; // a whole name-word starts with the full query string
   if(full.includes(q)) return 3;                          // buried substring match
   return -1;
 }
@@ -655,12 +656,13 @@ function initMap(){
   const div=$("#lmap"); if(!div||!window.L) return;
   if(mapObj){try{mapObj.remove();}catch(e){}}
   mapObj=L.map(div,{worldCopyJump:true}).setView([20,0],2);
-  const style=state.theme==="dark"?"dark_all":"light_all";
-  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`,
-    {maxZoom:19,subdomains:"abcd",attribution:"\u00a9 OpenStreetMap \u00b7 \u00a9 CARTO"}).addTo(mapObj);
+  tileLayer=L.tileLayer(tileUrl(),{maxZoom:19,subdomains:"abcd",attribution:"\u00a9 OpenStreetMap \u00b7 \u00a9 CARTO"}).addTo(mapObj);
   markersLayer=L.layerGroup().addTo(mapObj);
   updateMapMarkers(true);
 }
+function tileUrl(){ const style=state.theme==="dark"?"dark_all":"light_all";
+  return `https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`; }
+function updateMapTheme(){ if(mapObj&&tileLayer&&window.L){ tileLayer.setUrl(tileUrl()); } }
 function loadGeo(){ try{const s=localStorage.getItem("gv_geo"); if(s) geoCache=JSON.parse(s)||{};}catch(e){} }
 function saveGeo(){ try{localStorage.setItem("gv_geo",JSON.stringify(geoCache));}catch(e){} }
 function updateMapMarkers(fit){
@@ -795,7 +797,7 @@ document.addEventListener("click",e=>{
   if(act==="view"){ if(state.view==="map"&&el.dataset.view!=="map"&&mapObj){try{mapObj.remove();}catch(e){}mapObj=null;markersLayer=null;}
     state.view=el.dataset.view;if(state.view==="tree")state.recenter=true;render();}
   else if(act==="select"){state.selected=el.dataset.id;render();}
-  else if(act==="theme"){state.theme=state.theme==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",state.theme);renderChrome();}
+  else if(act==="theme"){state.theme=state.theme==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",state.theme);renderChrome();updateMapTheme();}
   else if(act==="open"){$("#file").click();}
   else if(act==="banner-off"){state.bannerOff=true;render();}
   else if(act==="close"){$("#panel").className="hidden";syncScrim();}
@@ -825,7 +827,7 @@ document.addEventListener("click",e=>{
     } else if(state.view==="tree"){                     // refocus the tree on the picked person, then close the results
       if(state.treeMode==="anc") state.ancFocus=id; else state.descFocus=id;
       state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();
-      state.recenter=true; render();
+      render(); centerNode(id,0.9);                       // rebuild layout, then jump straight to the middle of the screen
     } }
 });
 function syncSearchClear(){ const b=$("#searchClear"); if(b) b.style.display=state.query.trim()?"grid":"none"; }
