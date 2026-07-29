@@ -51,6 +51,8 @@ header{display:flex;align-items:center;gap:8px;min-height:56px;padding:0 10px;pa
 .searchbox{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:4px;
   background:var(--panel2);flex:1;max-width:240px;margin-left:auto}
 .searchbox input{background:none;border:none;outline:none;color:var(--text);font-size:15px;width:100%}
+.search-clear{width:20px;height:20px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;color:var(--faint);background:var(--line)}
+.search-clear:active{color:var(--text)}
 .btn{display:flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 14px;border-radius:4px;font-size:14px;font-weight:600}
 .btn.primary{background:var(--green);color:var(--on-green)}
 .btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
@@ -142,7 +144,7 @@ main{flex:1;min-width:0;position:relative}
 .close:active{background:var(--panel2)}
 
 /* map */
-#mapwrap{position:absolute;inset:0;display:flex;flex-direction:column}
+#mapwrap{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column}
 .map-top{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
 .map-status{font:11px var(--mono);color:var(--soft)}
 #lmap{flex:1;min-height:0;background:var(--panel2)}
@@ -212,6 +214,9 @@ input[type=range]::-moz-range-thumb{border:none;width:16px;height:16px;border-ra
     <div class="searchbox">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input id="search" placeholder="Search…" autocomplete="off"/>
+      <button id="searchClear" class="search-clear" data-act="clearsearch" aria-label="Clear search" style="display:none">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
     </div>
     <button class="btn primary" data-act="open" title="Open a GEDCOM (.ged) file">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M8 7l4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
@@ -698,8 +703,7 @@ function syncScrim(){const s=$("#scrim");if(s)s.classList.toggle("on",($("#panel
 function renderPanel(){ _renderPanel(); syncScrim(); }
 function _renderPanel(){
   const panel=$("#panel");
-  if(state.view==="map"){                              // on the map, the panel is only used for search results
-    if(!state.query.trim()){ panel.className="hidden"; panel.innerHTML=""; return; }
+  if(state.query.trim()&&(state.view==="map"||state.view==="tree")){    // search results list (map: side panel; tree: side panel/sheet)
     const q=state.query.trim().toLowerCase();
     const matches=searchPeople(state.people,q);
     const fmt=e=>`${e&&e.y!=null?e.y:"?"}${e&&e.place?" \u00b7 "+esc(e.place):""}`;
@@ -710,7 +714,7 @@ function _renderPanel(){
           <div class="p-sub">for \u201c${esc(state.query.trim())}\u201d</div></div>
         <button class="close" data-act="clearsearch">${icon(ICONS.x,18)}</button></div>
       <div class="p-body">${
-        matches.length? matches.map(p=>`<button class="mr-row" data-act="mapfocus" data-id="${p.id}">
+        matches.length? matches.map(p=>`<button class="mr-row" data-act="pickresult" data-id="${p.id}">
           <div class="mr-name">${esc(fullName(p))}${p.maiden?` <span style="color:var(--faint);font-weight:400">n\u00e9e ${esc(p.maiden)}</span>`:""}</div>
           ${p.born?`<div class="mr-fact"><span>b.</span>${fmt(p.born)}</div>`:""}
           ${p.died?`<div class="mr-fact"><span>d.</span>${fmt(p.died)}</div>`:""}
@@ -718,6 +722,7 @@ function _renderPanel(){
       }</div>`;
     return;
   }
+  if(state.view==="map"){ panel.className="hidden"; panel.innerHTML=""; return; }
   const p=G.byId[state.selected];
   if(!p){panel.className="hidden";panel.innerHTML="";return;}
   panel.className="";
@@ -794,7 +799,7 @@ document.addEventListener("click",e=>{
   else if(act==="open"){$("#file").click();}
   else if(act==="banner-off"){state.bannerOff=true;render();}
   else if(act==="close"){$("#panel").className="hidden";syncScrim();}
-  else if(act==="scrim-close"){ if(state.view==="map"){state.query="";const s=$("#search");if(s)s.value="";renderPanel();updateMapMarkers(true);} else {$("#panel").className="hidden";syncScrim();} }
+  else if(act==="scrim-close"){ if(state.view==="map"||state.view==="tree"){state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();renderPanel();if(state.view==="map")updateMapMarkers(true);} else {$("#panel").className="hidden";syncScrim();} }
   else if(act==="focus"){state.view="tree";render();centerNode(state.selected,0.95);}
   else if(act==="mode"){const m=el.dataset.mode; if(m!==state.treeMode){ state.treeMode=m;
     if(m==="anc"){ if(state.selected&&G.byId[state.selected])state.ancFocus=state.selected; else if(!state.ancFocus)state.ancFocus=pickAncFocus(); }
@@ -806,23 +811,29 @@ document.addEventListener("click",e=>{
   else if(act==="start"){centerStart();}
   else if(act==="key"){state.showKey=!state.showKey;render();}
   else if(act==="geocode"){geocodePlaces();}
-  else if(act==="clearsearch"){state.query="";const s=$("#search");if(s)s.value="";renderPanel();if(state.view==="map")updateMapMarkers(true);}
+  else if(act==="clearsearch"){state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();renderPanel();if(state.view==="map")updateMapMarkers(true);}
   else if(act==="tomap"){ const p=G.byId[state.selected]; if(!p)return;
     state.query=(p.surname&&p.surname.trim())?p.surname.trim():fullName(p);
     state.view="map"; state.yearFrom=null; state.yearTo=null;
     const s=$("#search"); if(s)s.value=state.query; render(); }
-  else if(act==="mapfocus"){ const id=el.dataset.id; state.selected=id; const p=G.byId[id];
-    const e=(p.born&&p.born.lat!=null)?p.born:((p.died&&p.died.lat!=null)?p.died:null);
-    if(e&&mapObj&&window.L){ mapObj.setView([e.lat,e.lon],9); updateMapMarkers(false);
-      let hit=null; markersLayer.eachLayer(l=>{const ll=l.getLatLng&&l.getLatLng(); if(ll&&Math.abs(ll.lat-e.lat)<1e-6&&Math.abs(ll.lng-e.lon)<1e-6)hit=l;}); if(hit&&hit.openPopup)hit.openPopup(); }
-    else if(!e){ toast("Tap \u201cFind places\u201d to map this person",true); } }
+  else if(act==="pickresult"){ const id=el.dataset.id; state.selected=id;
+    if(state.view==="map"){ const p=G.byId[id];
+      const e=(p.born&&p.born.lat!=null)?p.born:((p.died&&p.died.lat!=null)?p.died:null);
+      if(e&&mapObj&&window.L){ mapObj.setView([e.lat,e.lon],9); updateMapMarkers(false);
+        let hit=null; markersLayer.eachLayer(l=>{const ll=l.getLatLng&&l.getLatLng(); if(ll&&Math.abs(ll.lat-e.lat)<1e-6&&Math.abs(ll.lng-e.lon)<1e-6)hit=l;}); if(hit&&hit.openPopup)hit.openPopup(); }
+      else if(!e){ toast("Tap \u201cFind places\u201d to map this person",true); }
+    } else if(state.view==="tree"){                     // refocus the tree on the picked person, then close the results
+      if(state.treeMode==="anc") state.ancFocus=id; else state.descFocus=id;
+      state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();
+      state.recenter=true; render();
+    } }
 });
+function syncSearchClear(){ const b=$("#searchClear"); if(b) b.style.display=state.query.trim()?"grid":"none"; }
 document.addEventListener("input",e=>{
-  if(e.target.id==="search"){state.query=e.target.value;
+  if(e.target.id==="search"){state.query=e.target.value; syncSearchClear();
     if(state.view==="list")renderList($("#main"));
     else if(state.view==="map"){renderPanel();updateMapMarkers(true);}
-    else{const q=state.query.trim().toLowerCase();const best=q?searchPeople(state.people,q)[0]:null;
-      if(best){state.selected=best.id;renderPanel();}}}
+    else renderPanel();}      // tree (and any other view): show the results list in the side panel/sheet
   else if(e.target.id==="yrFrom"){ state.yearFrom=+e.target.value; if(state.yearFrom>state.yearTo){state.yearTo=state.yearFrom;const t=$("#yrTo");if(t)t.value=state.yearTo;} updateMapMarkers(false); }
   else if(e.target.id==="yrTo"){ state.yearTo=+e.target.value; if(state.yearTo<state.yearFrom){state.yearFrom=state.yearTo;const f=$("#yrFrom");if(f)f.value=state.yearFrom;} updateMapMarkers(false); }
 });
