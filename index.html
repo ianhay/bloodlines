@@ -539,11 +539,14 @@ function renderTree(main){
 function searchScore(p,q){                        // lower is better; -1 = no match
   if(!q) return 0;
   const given=(p.given||"").toLowerCase(), surname=(p.surname||"").toLowerCase(), full=fullName(p).toLowerCase();
+  const idNorm=(p.id||"").toLowerCase().replace(/[^a-z0-9]/g,""), qNorm=q.replace(/[^a-z0-9]/g,"");
   if(full===q) return 0;                                  // exact full-name match
+  if(qNorm&&idNorm&&idNorm===qNorm) return 0;             // exact record-ID match (with or without @/case, e.g. "500066", "i500066", "@I500066@")
   const qWords=q.split(/\s+/).filter(Boolean), nameWords=[given,surname].filter(Boolean);
   if(qWords.length&&qWords.every(qw=>nameWords.some(nw=>nw.startsWith(qw)))) return 1; // every query word prefixes a name part (handles "ian" and "ian hay" alike)
   if(full.split(/\s+/).some(w=>w.startsWith(q))) return 2; // a whole name-word starts with the full query string
   if(full.includes(q)) return 3;                          // buried substring match
+  if(qNorm&&qNorm.length>=2&&idNorm&&idNorm.includes(qNorm)) return 3; // partial record-ID match
   return -1;
 }
 function searchPeople(list,q){
@@ -848,9 +851,9 @@ document.addEventListener("click",e=>{
     } }
 });
 function dismissPanel(){
-  if(state.query.trim()&&(state.view==="map"||state.view==="tree")){
-    state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();renderPanel();
-    if(state.view==="map")updateMapMarkers(true);
+  if(state.query.trim()){
+    state.query="";const s=$("#search");if(s)s.value="";
+    applySearchInput();
   } else { $("#panel").className="hidden"; syncScrim(); }
 }
 function syncSearchClear(){ const b=$("#searchClear"); if(b) b.style.display=state.query.trim()?"grid":"none"; }
