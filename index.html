@@ -1,15 +1,13 @@
+<!-- Bloodlines v1.0.0 -->
 <!doctype html>
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"/>
-<title>GEDCOM Viewer</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<title>Bloodlines</title>
 <link rel="preconnect" href="https://unpkg.com"/>
 <link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin/>
 <link rel="dns-prefetch" href="https://nominatim.openstreetmap.org"/>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"/>
 <style>
 /* ============================================================
    GEDCOM Viewer — single-file, read-only family tree browser.
@@ -18,20 +16,19 @@
    Plain HTML + CSS + vanilla JS. No frameworks, no build step.
    ============================================================ */
 :root{
-  --bg:#F3F5F8; --panel:#FFFFFF; --panel2:#EDF1F6; --text:#191D23;
-  --soft:#505A68; --faint:#737E8C; --line:#C9CED6;
-  --green:#24529A; --green-soft:#DFE8F6; --brass:#D87822; --brass-soft:#F5DCC6;
-  --danger:#B34F4A; --shadow:rgba(29,49,78,.10); --on-green:#fff;
+  --bg:#faf8f5; --panel:#ffffff; --panel2:#f1ede6; --text:#2b2d42;
+  --soft:#5b5e77; --faint:#82869f; --line:#ddd6cc;
+  --green:#005f73; --green-soft:#d8eef1; --brass:#0a9396; --brass-soft:#d3f0ee;
+  --danger:#b3261e; --shadow:rgba(43,45,66,.12); --on-green:#fff;
   --navh:calc(56px + env(safe-area-inset-bottom,0px));
-  --disp:'Barlow Condensed',Arial Narrow,'Segoe UI',sans-serif;
-  --body:'IBM Plex Sans','Segoe UI',Arial,sans-serif;
-  --mono:'IBM Plex Mono','Cascadia Mono',Consolas,monospace;
+  --sysfont:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --disp:var(--sysfont); --body:var(--sysfont); --mono:var(--sysfont);
 }
 [data-theme="dark"]{
-  --bg:#10151C; --panel:#181F29; --panel2:#222C39; --text:#F3F5F8;
-  --soft:#C0C8D3; --faint:#8290A2; --line:#354253;
-  --green:#7EA8F2; --green-soft:#263B58; --brass:#F29B4B; --brass-soft:#613719;
-  --danger:#E07A74; --shadow:rgba(0,0,0,.4); --on-green:#10151C;
+  --bg:#12181b; --panel:#1a2126; --panel2:#212a30; --text:#e0e6ed;
+  --soft:#aab4c0; --faint:#7c8794; --line:#2c363d;
+  --green:#005f73; --green-soft:#173840; --brass:#0a9396; --brass-soft:#123a38;
+  --danger:#e0857a; --shadow:rgba(0,0,0,.4); --on-green:#fff;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
@@ -46,11 +43,12 @@ input{font-family:inherit}
 header{display:flex;align-items:center;gap:8px;min-height:56px;padding:0 10px;padding-top:env(safe-area-inset-top,0px);
   border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:17px;letter-spacing:-.02em;white-space:nowrap}
-.brand .sub{font:500 10px var(--mono);color:var(--faint);letter-spacing:0}
+.brand .ver{margin-left:6px;font-size:11px;font-weight:600;color:var(--faint);vertical-align:1px}
 .count{font:600 11px var(--mono);color:var(--brass);background:var(--brass-soft);padding:3px 8px;border-radius:20px}
 .searchbox{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:4px;
   background:var(--panel2);flex:1;max-width:240px;margin-left:auto}
 .searchbox input{background:none;border:none;outline:none;color:var(--text);font-size:15px;width:100%}
+.searchbox input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none}
 .search-clear{width:20px;height:20px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;color:var(--faint);background:var(--line)}
 .search-clear:active{color:var(--text)}
 .btn{display:flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 14px;border-radius:4px;font-size:14px;font-weight:600}
@@ -66,7 +64,7 @@ header{display:flex;align-items:center;gap:8px;min-height:56px;padding:0 10px;pa
 main{flex:1;min-width:0;position:relative;z-index:0}
 
 .banner{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;gap:8px;
-  padding:8px 12px;font-size:12.5px;background:var(--brass-soft);color:#8a4d10}
+  padding:8px 12px;font-size:12.5px;background:var(--brass-soft);color:#06474a}
 [data-theme="dark"] .banner{color:var(--brass)}
 .banner b{font-weight:700}
 .banner button{margin-left:auto;color:inherit;opacity:.7;padding:2px}
@@ -142,8 +140,13 @@ main{flex:1;min-width:0;position:relative;z-index:0}
 #mapwrap{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column}
 .map-top{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
 .map-status{font:11px var(--mono);color:var(--soft)}
-#lmap{flex:1;min-height:0;background:var(--panel2)}
+#lmap{flex:1;min-height:0;position:relative;background:var(--panel2)}
 .map-msg{padding:18px;text-align:center;color:var(--soft);font-size:14px}
+.map-i{position:absolute;right:8px;bottom:8px;width:22px;height:22px;border-radius:50%;z-index:5;
+  background:var(--panel);border:1px solid var(--line);color:var(--soft);font:italic 700 12px Georgia,serif;
+  display:grid;place-items:center;box-shadow:0 1px 4px var(--shadow)}
+.map-attrib{position:absolute;right:8px;bottom:36px;z-index:5;background:var(--panel);border:1px solid var(--line);
+  padding:5px 9px;border-radius:4px;font-size:11px;color:var(--soft);box-shadow:0 2px 8px var(--shadow);white-space:nowrap}
 .mr-row{display:block;width:100%;text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);background:none}
 .mr-row:active{background:var(--panel2)}
 .mr-name{font-weight:600;font-size:14.5px}
@@ -202,13 +205,13 @@ input[type=range]::-moz-range-thumb{border:none;width:16px;height:16px;border-ra
         <circle cx="13" cy="6" r="3.4" fill="var(--green)"/><circle cx="6" cy="19" r="3" fill="var(--brass)"/><circle cx="20" cy="19" r="3" fill="var(--brass)"/>
         <path d="M13 9.4V13M13 13C13 16 7 15 6 16M13 13C13 16 19 15 20 16" stroke="var(--soft)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
       </svg>
-      <span>GEDCOM&nbsp;Viewer</span>
+      <span>Bloodlines<span class="ver">v1.0.0</span></span>
     </div>
     <span class="count" id="count"></span>
     <div class="tabs hide-mobile" id="tabs"></div>
     <div class="searchbox">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-      <input id="search" placeholder="Search…" autocomplete="off"/>
+      <input id="search" type="search" placeholder="Search…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"/>
       <button id="searchClear" class="search-clear" data-act="clearsearch" aria-label="Clear search" style="display:none">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
@@ -323,8 +326,8 @@ function buildGraph(people,fams){
 
 /* ---- tree layout: tidy descendant layout, a couple = one node ---- */
 const PW=158,PH=72,VP=30,VGAP=22,HGAP=74,COLW=PW+HGAP;
-const BAR_COLORS =['var(--soft)','var(--brass)','#B34F4A','#5D78A4']; // marriage-bar colour by order
-const LINK_COLORS=['var(--line)','var(--brass)','#B34F4A','#5D78A4']; // child-line colour by parents' marriage
+const BAR_COLORS =['var(--soft)','var(--brass)','var(--danger)','var(--text)']; // marriage-bar colour by order
+const LINK_COLORS=['var(--line)','var(--brass)','var(--danger)','var(--text)']; // child-line colour by parents' marriage
 function makeTree(pid,seen){
   if(seen.has(pid))return{pid,unions:[]}; seen.add(pid);
   const famIds=(G.spouseFams[pid]||[]).slice().sort((a,b)=>{          // earliest marriage first
@@ -527,10 +530,7 @@ function renderTree(main){
   </div>${state.treeMode==="anc"?`<div class="focalbar">Ancestors${esc(focalName)}</div>`:""}`;
   main.innerHTML=`${bannerHTML()}<div id="tree"><svg><g id="tg">${linkSVG}${barSVG}${cbarSVG}${nodeSVG}</g></svg>${modeUI}
     <div class="controls">
-      <button data-act="zoom" data-dir="in" aria-label="Zoom in" title="Zoom in">${icon(ICONS.plus,16)}</button>
-      <button data-act="zoom" data-dir="out" aria-label="Zoom out" title="Zoom out">${icon(ICONS.minus,16)}</button>
       <button data-act="extents" aria-label="Zoom to extents" title="Zoom to extents (whole tree)">${icon(ICONS.extents,16)}</button>
-      <button data-act="start" aria-label="Zoom to start" title="Zoom to start (top generation)">${icon(ICONS.start,16)}</button>
     </div>
     <div class="hint">drag to scroll \u00b7 pinch to zoom \u00b7 tap a person</div></div>`;
   if(state.recenter){ centerInitial(); state.recenter=false; } else { applyPan(); }
@@ -619,18 +619,29 @@ function yearBounds(){
   if(!isFinite(lo)){lo=1500;hi=2025;}
   return {lo:Math.floor(lo/10)*10, hi:Math.ceil(hi/10)*10};
 }
+function plotStats(q){                              // people-level counts (not event-level) for the status line
+  let plotted=0, noInfo=0;
+  state.people.forEach(p=>{ if(q&&searchScore(p,q)<0) return;
+    const hasCoord=(p.born&&p.born.lat!=null)||(p.died&&p.died.lat!=null);
+    const hasPlace=(p.born&&p.born.place)||(p.died&&p.died.place);
+    if(hasCoord) plotted++; if(!hasPlace) noInfo++; });
+  return {plotted,noInfo};
+}
 function renderMap(main){
   applyLocalGeo();
   const q=state.query.trim().toLowerCase();
-  const ev=mapEvents().filter(e=>!q||searchScore(e.p,q)>=0), need=placesNeeding(), b=yearBounds();
+  const need=placesNeeding(), b=yearBounds(), {plotted,noInfo}=plotStats(q);
   if(state.yearFrom==null||state.yearFrom<b.lo||state.yearFrom>b.hi) state.yearFrom=b.lo;
   if(state.yearTo==null||state.yearTo>b.hi||state.yearTo<b.lo) state.yearTo=b.hi;
   main.innerHTML=`<div id="mapwrap">
     <div class="map-top">
-      <button class="btn ghost" data-act="geocode" id="geo-btn">${icon(ICONS.pin,15)} Find places</button>
-      <span class="map-status" id="geo-status">${ev.length?ev.length+" located":""}${need.length?" \u00b7 "+need.length+" to find":""}</span>
+      <button class="btn ghost" data-act="geocode" id="geo-btn">${icon(ICONS.pin,15)} Plot locations</button>
+      <span class="map-status" id="geo-status">${plotted} plotted${noInfo?" \u00b7 "+noInfo+" with no location":""}${need.length?" \u00b7 "+need.length+" to look up":""}</span>
     </div>
-    <div id="lmap"></div>
+    <div id="lmap">
+      <button class="map-i" data-act="attrib" aria-label="Map data attribution" title="Map data attribution">i</button>
+      <div class="map-attrib" id="mapAttrib" style="display:none">\u00a9 OpenStreetMap contributors \u00b7 \u00a9 CARTO</div>
+    </div>
     <div id="map-msg" class="map-msg" style="display:none"></div>
     <div class="slider-wrap">
       <div class="slider-head"><span style="color:var(--soft);font-size:12px;font-weight:500">Year range</span><span class="yr" id="yrlab">${state.yearFrom}\u2013${state.yearTo}</span></div>
@@ -644,8 +655,8 @@ function renderMap(main){
 function initMap(){
   const div=$("#lmap"); if(!div||!window.L) return;
   if(mapObj){try{mapObj.remove();}catch(e){}}
-  mapObj=L.map(div,{worldCopyJump:true}).setView([20,0],2);
-  tileLayer=L.tileLayer(tileUrl(),{maxZoom:19,subdomains:"abcd",attribution:"\u00a9 OpenStreetMap \u00b7 \u00a9 CARTO"}).addTo(mapObj);
+  mapObj=L.map(div,{worldCopyJump:true,attributionControl:false}).setView([20,0],2);
+  tileLayer=L.tileLayer(tileUrl(),{maxZoom:19,subdomains:"abcd"}).addTo(mapObj);
   markersLayer=L.layerGroup().addTo(mapObj);
   updateMapMarkers(true);
 }
@@ -658,7 +669,7 @@ function updateMapMarkers(fit){
   const yl=$("#yrlab"); if(yl)yl.textContent=state.yearFrom+"\u2013"+state.yearTo;
   if(!markersLayer||!window.L) return;
   markersLayer.clearLayers();
-  const green=cssVar("--green","#24529A"), brass=cssVar("--brass","#D87822");
+  const green=cssVar("--green","#005f73"), brass=cssVar("--brass","#0a9396");
   const q=state.query.trim().toLowerCase();
   const evs=mapEvents().filter(e=>e.y!=null&&e.y>=state.yearFrom&&e.y<=state.yearTo&&(!q||searchScore(e.p,q)>=0)), pts=[];
   evs.forEach(e=>{ const col=e.kind==="born"?green:brass;
@@ -671,10 +682,10 @@ function updateMapMarkers(fit){
 async function geocodePlaces(){
   if(!window.L){toast("Open the map first (needs internet)",true);return;}
   const btn=$("#geo-btn"), status=$("#geo-status"), list=placesNeeding();
-  if(!list.length){ if(status)status.textContent="All places located"; updateMapMarkers(true); return; }
+  if(!list.length){ if(status){const{plotted,noInfo}=plotStats(state.query.trim().toLowerCase());status.textContent=`${plotted} plotted${noInfo?" \u00b7 "+noInfo+" with no location":""}`;} updateMapMarkers(true); return; }
   if(btn)btn.disabled=true;
   for(let i=0;i<list.length;i++){ const place=list[i];
-    if(status)status.textContent=`Locating ${i+1}/${list.length}\u2026`;
+    if(status)status.textContent=`Looking up ${i+1}/${list.length}\u2026`;
     try{ const r=await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(place),{headers:{Accept:"application/json"}});
       const j=await r.json();
       if(j&&j[0]){geoCache[place]={lat:+j[0].lat,lon:+j[0].lon};} else{geoCache[place]={nf:true};}
@@ -683,7 +694,7 @@ async function geocodePlaces(){
     await new Promise(res=>setTimeout(res,1100)); // respect OSM ~1 req/sec
   }
   applyGeocache(); updateMapMarkers(true);
-  if(status)status.textContent=`Located ${mapEvents().length} events`;
+  if(status){const{plotted,noInfo}=plotStats(state.query.trim().toLowerCase());status.textContent=`${plotted} plotted${noInfo?" \u00b7 "+noInfo+" with no location":""}`;}
   if(btn)btn.disabled=false;
 }
 
@@ -815,6 +826,7 @@ document.addEventListener("click",e=>{
   else if(act==="zoom"){zoomBtn(el.dataset.dir==="in"?1.25:0.8);}
   else if(act==="extents"){fitTree();}
   else if(act==="start"){centerStart();}
+  else if(act==="attrib"){ const a=$("#mapAttrib"); if(a) a.style.display=a.style.display==="none"?"block":"none"; }
   else if(act==="geocode"){geocodePlaces();}
   else if(act==="clearsearch"){dismissPanel();}
   else if(act==="tomap"){ const p=G.byId[state.selected]; if(!p)return;
@@ -842,13 +854,22 @@ function dismissPanel(){
   } else { $("#panel").className="hidden"; syncScrim(); }
 }
 function syncSearchClear(){ const b=$("#searchClear"); if(b) b.style.display=state.query.trim()?"grid":"none"; }
+function applySearchInput(){
+  syncSearchClear();
+  if(state.view==="list")renderList($("#main"));
+  else if(state.view==="map"){renderPanel();updateMapMarkers(true);}
+  else renderPanel();       // tree (and any other view): show the results list in the side panel/sheet
+}
 document.addEventListener("input",e=>{
-  if(e.target.id==="search"){state.query=e.target.value; syncSearchClear();
-    if(state.view==="list")renderList($("#main"));
-    else if(state.view==="map"){renderPanel();updateMapMarkers(true);}
-    else renderPanel();}      // tree (and any other view): show the results list in the side panel/sheet
+  if(e.target.id==="search"){state.query=e.target.value; applySearchInput();}
   else if(e.target.id==="yrFrom"){ state.yearFrom=+e.target.value; if(state.yearFrom>state.yearTo){state.yearTo=state.yearFrom;const t=$("#yrTo");if(t)t.value=state.yearTo;} updateMapMarkers(false); }
   else if(e.target.id==="yrTo"){ state.yearTo=+e.target.value; if(state.yearTo<state.yearFrom){state.yearFrom=state.yearTo;const f=$("#yrFrom");if(f)f.value=state.yearFrom;} updateMapMarkers(false); }
+});
+document.addEventListener("paste",e=>{                 // defensive: some mobile browsers don't reliably fire 'input' right after paste
+  if(e.target&&e.target.id==="search") setTimeout(()=>{ if(e.target.value!==state.query){ state.query=e.target.value; applySearchInput(); } },0);
+});
+document.addEventListener("keydown",e=>{
+  if(e.target&&e.target.id==="search"&&e.key==="Enter"){ e.preventDefault(); e.target.blur(); } // search is live already; Enter just dismisses the keyboard
 });
 function decodeBuffer(buf){                                   // handle UTF-8 / UTF-16 GEDCOM exports, with or without BOM
   const b=new Uint8Array(buf); let label="utf-8";
