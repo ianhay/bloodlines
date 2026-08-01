@@ -674,7 +674,7 @@ function updateMapMarkers(fit){
   markersLayer.clearLayers();
   const green=cssVar("--green","#005f73"), brass=cssVar("--brass","#0a9396");
   const q=state.query.trim().toLowerCase();
-  const evs=mapEvents().filter(e=>e.y!=null&&e.y>=state.yearFrom&&e.y<=state.yearTo&&(!q||searchScore(e.p,q)>=0)), pts=[];
+  const evs=mapEvents().filter(e=>(e.y==null||(e.y>=state.yearFrom&&e.y<=state.yearTo))&&(!q||searchScore(e.p,q)>=0)), pts=[];
   evs.forEach(e=>{ const col=e.kind==="born"?green:brass;
     const m=L.circleMarker([e.lat,e.lon],{radius:6,color:col,weight:2,fillColor:col,fillOpacity:e.kind==="born"?0.85:0.15});
     m.bindPopup(`<b>${esc(fullName(e.p))}</b><br>${e.kind==="born"?"Born":"Died"} ${e.y||""}${e.place?"<br>"+esc(e.place):""}`);
@@ -841,9 +841,17 @@ document.addEventListener("click",e=>{
       state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();renderPanel();   // close the results list so the map is fully visible
       const p=G.byId[id];
       const e=(p.born&&p.born.lat!=null)?p.born:((p.died&&p.died.lat!=null)?p.died:null);
-      if(e&&mapObj&&window.L){ mapObj.setView([e.lat,e.lon],9); updateMapMarkers(false);
-        let hit=null; markersLayer.eachLayer(l=>{const ll=l.getLatLng&&l.getLatLng(); if(ll&&Math.abs(ll.lat-e.lat)<1e-6&&Math.abs(ll.lng-e.lon)<1e-6)hit=l;}); if(hit&&hit.openPopup)hit.openPopup(); }
-      else if(!e){ toast("Tap \u201cFind places\u201d to map this person",true); }
+      if(!e){ toast("Tap \u201cPlot locations\u201d to map this person",true); }
+      else if(!mapObj||!window.L){ toast("Map is still loading \u2014 try again in a moment",true); }
+      else{
+        if(e.y!=null&&(e.y<state.yearFrom||e.y>state.yearTo)){                     // widen the range in place so their marker isn't filtered out
+          if(e.y<state.yearFrom)state.yearFrom=e.y; if(e.y>state.yearTo)state.yearTo=e.y;
+          const yf=$("#yrFrom"),yt=$("#yrTo"),yl=$("#yrlab");
+          if(yf)yf.value=state.yearFrom; if(yt)yt.value=state.yearTo; if(yl)yl.textContent=state.yearFrom+"\u2013"+state.yearTo;
+        }
+        mapObj.setView([e.lat,e.lon],9); updateMapMarkers(false);
+        let hit=null; markersLayer.eachLayer(l=>{const ll=l.getLatLng&&l.getLatLng(); if(ll&&Math.abs(ll.lat-e.lat)<1e-6&&Math.abs(ll.lng-e.lon)<1e-6)hit=l;}); if(hit&&hit.openPopup)hit.openPopup();
+      }
     } else if(state.view==="tree"){                     // refocus the tree on the picked person, then close the results
       if(state.treeMode==="anc") state.ancFocus=id; else state.descFocus=id;
       state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();
@@ -926,7 +934,7 @@ function init(){
   state.selected=null;renderPanel();
 }
 init();
-window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,decodeBuffer,localGeocode,searchPeople,searchScore,saveLastGed,loadLastGed,clearLastGed,get G(){return G;}};
+window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,decodeBuffer,localGeocode,searchPeople,searchScore,saveLastGed,loadLastGed,clearLastGed,mapEvents,get G(){return G;}};
 </script>
 </body>
 </html>
