@@ -260,7 +260,7 @@ const SAMPLE_FAMS=[
 ];
 
 const state={people:[],fams:[],theme:"light",view:"tree",treeMode:"anc",ancFocus:null,descFocus:null,selected:null,root:null,query:"",imported:false,bannerOff:false,yearFrom:null,yearTo:null};
-let G=null, pan={x:40,y:40,s:1}, lastLayout={minX:0,maxX:0,maxY:0}, layoutCache={root:null,L:null};
+let G=null, pan={x:40,y:40,s:1}, lastLayout={minX:0,maxX:0,maxY:0}, layoutCache={root:null,L:null}, layoutCacheV={key:null,L:null};
 let mapObj=null, markersLayer=null, tileLayer=null, geoCache={};
 
 /* ---- GEDCOM parser (common 5.5.1 / 7.0 shape) ---- */
@@ -429,6 +429,96 @@ function buildForest(){                                                // every 
   if(left.length){ let ly=y+10; left.forEach(p=>{ out.nodes.push({id:p.id,x:0,y:ly,loose:true}); out.rendered.add(p.id); ly+=PH+VGAP; }); }
   return finalize(out);
 }
+/* ---- VERTICAL TREE (top-to-bottom). Same underlying tree structure (makeTree is orientation-agnostic);
+   couples now sit side-by-side so spacing uses card WIDTH, not height, along the perpendicular axis. ---- */
+const ROWH=PH+90, CP=30, SIBGAP=32;
+const stripWOf=n=>cardsOf(n)*PW+(cardsOf(n)-1)*CP;
+function finalizeV(out){
+  const xs=out.nodes.map(n=>n.x),ys=out.nodes.map(n=>n.y);
+  return {nodes:out.nodes,bars:out.bars,cbars:out.cbars||[],links:out.links,rendered:out.rendered,
+    minX:xs.length?Math.min(...xs):0, maxX:xs.length?Math.max(...xs)+PW:0, maxY:ys.length?Math.max(...ys)+PH:0,
+    remarriage:out.remarriage, divorce:out.divorce};
+}
+function measureV(n){
+  n.unions.forEach(u=>u.kids.forEach(measureV));
+  let cw=0,first=true;
+  n.unions.forEach(u=>{ if(!u.kids.length)return; let uw=0; u.kids.forEach((k,j)=>{uw+=k._w;if(j)uw+=SIBGAP;}); u._cw=uw;
+    cw+=uw; if(!first)cw+=SIBGAP; first=false; });
+  n._w=Math.max(stripWOf(n),cw); return n._w;
+}
+function layoutTreeV(root,left,out){
+  const place=(n,left,depth)=>{
+    n.y=depth*ROWH;                                                    // generation = row (grows downward)
+    const kidUnions=n.unions.filter(u=>u.kids.length);
+    let totalCW=0; kidUnions.forEach((u,i)=>{totalCW+=u._cw; if(i)totalCW+=SIBGAP;});
+    let cx=left+(n._w-totalCW)/2;
+    kidUnions.forEach(u=>{ let kx=cx; u.kids.forEach(k=>{place(k,kx,depth+1);kx+=k._w+SIBGAP;}); cx+=u._cw+SIBGAP; });
+    const sp=n.unions.filter(u=>u.spouseId);
+    const seq=[]; if(sp.length)seq.push({u:sp[0]}); const pIndex=seq.length; seq.push({person:true});
+    for(let i=1;i<sp.length;i++)seq.push({u:sp[i]});
+    const stripLeft=left+(n._w-stripWOf(n))/2;
+    seq.forEach((s,i)=>s.x=stripLeft+i*(PW+CP));
+    n.px=seq[pIndex].x;
+    out.nodes.push({id:n.pid,x:n.px,y:n.y}); out.rendered.add(n.pid);
+    const pcx=n.px+PW/2;
+    seq.forEach(s=>{ if(s.u){ const sx=s.x,uidx=s.u.idx; if(uidx>=1)out.remarriage=true; if(s.u.divorced)out.divorce=true;
+      out.nodes.push({id:s.u.spouseId,x:sx,y:n.y,spouse:true}); out.rendered.add(s.u.spouseId);
+      const leftX=Math.min(n.px,sx),rightX=Math.max(n.px,sx);
+      out.bars.push({y:n.y+PH/2,x1:leftX+PW,x2:rightX,uidx,year:(s.u.marriage&&s.u.marriage.y)||null,divorced:!!s.u.divorced});
+      s.u._ax=(pcx+sx+PW/2)/2;
+    }});
+    n.unions.forEach(u=>{ const ax=u.spouseId?u._ax:pcx;
+      u.kids.forEach(k=>out.links.push({x1:ax,y1:n.y+PH,x2:k.px+PW/2,y2:k.y,child:k.pid,uidx:u.idx})); });
+  };
+  place(root,left,0);
+}
+function buildLayoutV(rootId){
+  if(!rootId||!G.byId[rootId])return{nodes:[],bars:[],cbars:[],links:[],rendered:new Set(),minX:0,maxX:0,maxY:0,remarriage:false,divorce:false};
+  const out={nodes:[],bars:[],cbars:[],links:[],rendered:new Set(),remarriage:false,divorce:false};
+  const t=makeTree(rootId,new Set()); measureV(t); layoutTreeV(t,0,out); return finalizeV(out);
+}
+function buildAncestryV(focalId){                                     // pedigree: oldest generation at top, focal at bottom
+  if(!focalId||!G.byId[focalId])return{nodes:[],bars:[],cbars:[],links:[],rendered:new Set(),minX:0,maxX:0,maxY:0,remarriage:false,divorce:false};
+  const seen=new Set();
+  const make=pid=>{ if(seen.has(pid))return{pid,parents:[]}; seen.add(pid); return {pid,parents:G.parentsOf(pid).map(make)}; };
+  const tree=make(focalId);
+  const measure2=n=>{ n.parents.forEach(measure2); let pw=0; n.parents.forEach((p,i)=>{pw+=p._w;if(i)pw+=SIBGAP;}); n._w=Math.max(PW,pw); return n._w; };
+  measure2(tree);
+  let maxDepth=0; (function dd(n,d){maxDepth=Math.max(maxDepth,d);n.parents.forEach(p=>dd(p,d+1));})(tree,0);
+  const out={nodes:[],bars:[],cbars:[],links:[],rendered:new Set(),remarriage:false,divorce:false};
+  const place=(n,left,depth)=>{
+    n.y=(maxDepth-depth)*ROWH;                                        // oldest generation at y=0 (top), focal at bottom
+    if(!n.parents.length){ n.x=left+(n._w-PW)/2; }
+    else{ let tot=0;n.parents.forEach((p,i)=>{tot+=p._w;if(i)tot+=SIBGAP;});
+      let px=left+(n._w-tot)/2; n.parents.forEach(p=>{place(p,px,depth+1);px+=p._w+SIBGAP;});
+      n.x=(n.parents[0].x+n.parents[n.parents.length-1].x)/2; }
+    out.nodes.push({id:n.pid,x:n.x,y:n.y}); out.rendered.add(n.pid);
+    if(n.parents.length){
+      n.parents.forEach(p=>out.links.push({x1:n.x+PW/2,y1:n.y,x2:p.x+PW/2,y2:p.y+PH,child:n.pid,uidx:0}));  // child(top edge) -> parent(bottom edge, further up)
+      const fam=G.famById[G.childFam[n.pid]];
+      if(fam&&n.parents.length>=2){ const a=n.parents[0],b=n.parents[1];
+        out.cbars.push({y:a.y-15, x1:Math.min(a.x,b.x)+PW/2, x2:Math.max(a.x,b.x)+PW/2, year:(fam.married&&fam.married.y)||null, divorced:!!fam.divorced});
+        if(fam.divorced)out.divorce=true; }
+    }
+  };
+  place(tree,0,0);
+  return finalizeV(out);
+}
+function buildForestV(){
+  const out={nodes:[],bars:[],cbars:[],links:[],rendered:new Set(),remarriage:false,divorce:false};
+  const seen=new Set();
+  const roots=state.people.filter(p=>G.parentsOf(p.id).length===0)
+    .sort((a,b)=>G.downSet(b.id).size-G.downSet(a.id).size);
+  const TREE_GAP_V=60; let x=0;
+  for(const r of roots){
+    if(seen.has(r.id)||out.rendered.has(r.id))continue;
+    const t=makeTree(r.id,seen); measureV(t); layoutTreeV(t,x,out); x+=t._w+TREE_GAP_V;
+  }
+  const left=state.people.filter(p=>!out.rendered.has(p.id));
+  if(left.length){ let lx=x+10; left.forEach(p=>{ out.nodes.push({id:p.id,x:lx,y:0,loose:true}); out.rendered.add(p.id); lx+=PW+SIBGAP; }); }
+  return finalizeV(out);
+}
+
 function pickRoot(){
   let best=null,bn=-1;
   for(const p of state.people) if(G.parentsOf(p.id).length===0){const n=G.downSet(p.id).size; if(n>bn){bn=n;best=p.id;}}
@@ -443,6 +533,15 @@ function getLayout(){
   }
   return layoutCache.L;
 }
+function getLayoutV(){
+  if(state.treeMode==="anc" && (!state.ancFocus || !G.byId[state.ancFocus])) state.ancFocus = pickAncFocus();
+  const key = state.treeMode==="anc" ? "anc:"+state.ancFocus : "desc:"+(state.descFocus||"");
+  if(layoutCacheV.key!==key || !layoutCacheV.L){
+    layoutCacheV={key, L: state.treeMode==="anc" ? buildAncestryV(state.ancFocus)
+      : (state.descFocus&&G.byId[state.descFocus] ? buildLayoutV(state.descFocus) : buildForestV())};
+  }
+  return layoutCacheV.L;
+}
 
 /* ---- helpers ---- */
 const $=s=>document.querySelector(s);
@@ -454,6 +553,7 @@ const clip=(s,n)=>{s=s||"";return s.length>n?s.slice(0,n-1)+"\u2026":s;};
 const icon=(p,z=16)=>`<svg width="${z}" height="${z}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const ICONS={
   tree:'<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  vtree:'<circle cx="12" cy="4" r="3"/><path d="M12 7v4M12 11H6M12 11h6M6 11v4M18 11v4"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/>',
   list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   map:'<path d="M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15"/>',
   pin:'<path d="M12 21s7-6.4 7-11a7 7 0 0 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
@@ -476,7 +576,7 @@ function toast(msg,err){const el=$("#toast");el.textContent=msg;el.className=(er
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className=el.className.replace("show","").trim(),2600);}
 
 /* ---- render ---- */
-const VIEWS=[["tree","Tree"],["list","People"],["map","Map"]];
+const VIEWS=[["tree","Tree"],["vtree","Vertical"],["list","People"],["map","Map"]];
 function renderChrome(){
   $("#tabs").innerHTML=VIEWS.map(([k,l])=>`<button class="tab ${state.view===k?"on":""}" data-act="view" data-view="${k}">${icon(ICONS[k],15)} ${l}</button>`).join("");
   $("#mnav").innerHTML=VIEWS.map(([k,l])=>`<button class="${state.view===k?"on":""}" data-act="view" data-view="${k}">${icon(ICONS[k],19)}<span>${l}</span></button>`).join("");
@@ -490,7 +590,7 @@ function bannerHTML(){
 function render(){
   renderChrome();
   const main=$("#main");
-  if(state.view==="tree") renderTree(main); else if(state.view==="list") renderList(main); else renderMap(main);
+  if(state.view==="tree") renderTree(main); else if(state.view==="vtree") renderTreeV(main); else if(state.view==="list") renderList(main); else renderMap(main);
   renderPanel();
 }
 function renderTree(main){
@@ -523,6 +623,49 @@ function renderTree(main){
     if(b.divorced) e+=`<g stroke="var(--soft)" stroke-width="1.7"><line x1="${b.x-6}" y1="${my+8}" x2="${b.x+6}" y2="${my-1}"/><line x1="${b.x-6}" y1="${my+4}" x2="${b.x+6}" y2="${my-5}"/></g>`;
     if(b.year) e+=`<text x="${b.x-9}" y="${my+3.5}" text-anchor="end" font-size="9" fill="var(--faint)" style="font-family:var(--mono)">${b.divorced?"\u26AE":"\u26AD"}${b.year}</text>`;
     return `<line x1="${b.x}" y1="${b.y1}" x2="${b.x}" y2="${b.y2}" stroke="var(--soft)" stroke-width="1.6"/>${e}`;}).join("");
+  const focalName=state.treeMode==="anc"&&G.byId[state.ancFocus]?" of "+fullName(G.byId[state.ancFocus]):"";
+  const modeUI=`<div class="tmode">
+    <button data-act="mode" data-mode="anc" class="${state.treeMode==="anc"?"on":""}">Ancestors</button>
+    <button data-act="mode" data-mode="desc" class="${state.treeMode!=="anc"?"on":""}">Descendants</button>
+  </div>${state.treeMode==="anc"?`<div class="focalbar">Ancestors${esc(focalName)}</div>`:""}`;
+  main.innerHTML=`${bannerHTML()}<div id="tree"><svg><g id="tg">${linkSVG}${barSVG}${cbarSVG}${nodeSVG}</g></svg>${modeUI}
+    <div class="controls">
+      <button data-act="extents" aria-label="Zoom to extents" title="Zoom to extents (whole tree)">${icon(ICONS.extents,16)}</button>
+    </div>
+    <div class="hint">drag to scroll \u00b7 pinch to zoom \u00b7 tap a person</div></div>`;
+  if(state.recenter){ centerInitial(); state.recenter=false; } else { applyPan(); }
+  wireTree();
+}
+function renderTreeV(main){
+  const L=getLayoutV(); lastLayout=L;
+  const line=(state.treeMode!=="anc"&&state.selected)?new Set([state.selected,...G.upSet(state.selected)]):new Set();
+  const nodeSVG=L.nodes.map(n=>{const p=G.byId[n.id];if(!p)return"";
+    const cls="node"+(state.selected===n.id?" sel":line.has(n.id)?" line":""),av=p.sex==="F"?"f":"m";
+    return `<g class="${cls}" data-act="select" data-id="${n.id}" transform="translate(${n.x},${n.y})" style="cursor:pointer">
+      <title>${esc(fullName(p))}</title>
+      <rect width="${PW}" height="${PH}" rx="13"/>
+      <circle class="av-${av}" cx="23" cy="${PH/2}" r="13" stroke-width="1.2"/>
+      <text class="av-${av}-t" x="23" y="${PH/2+4}" text-anchor="middle" font-size="11" font-weight="700">${esc(initials(p))}</text>
+      <text class="nm" x="46" y="27">${esc(clip(p.given,14))}</text>
+      <text class="sn" x="46" y="45">${esc(clip(p.surname,14))}</text>
+      <text class="dt" x="46" y="62">${esc(lifespan(p))}</text></g>`;}).join("");
+  const linkSVG=L.links.map(l=>{const on=line.has(l.child),my=(l.y1+l.y2)/2;                 // vertical elbow: V-H-V instead of H-V-H
+    const col=on?"var(--green)":LINK_COLORS[Math.min(l.uidx,LINK_COLORS.length-1)];
+    const w=on?2.8:(l.uidx>=1?1.9:1.6);
+    const dash=(!on&&l.uidx>=1)?` stroke-dasharray="${l.uidx===1?"5 4":"2 4"}"`:"";
+    return `<path d="M${l.x1},${l.y1} V${my} H${l.x2} V${l.y2}" fill="none" stroke="${col}" stroke-width="${w}"${dash}/>`;}).join("");
+  const barSVG=L.bars.map(b=>{                                                                // couples sit side-by-side: horizontal bar
+    const col=BAR_COLORS[Math.min(b.uidx,BAR_COLORS.length-1)];
+    const mx=(b.x1+b.x2)/2, dash=b.uidx>=1?` stroke-dasharray="${b.uidx===1?"5 4":"2 4"}"`:"";
+    let extra="";
+    if(b.uidx>=1) extra+=`<circle cx="${mx}" cy="${b.y-15}" r="8.5" fill="var(--panel)" stroke="${col}" stroke-width="1.5"/><text x="${mx}" y="${b.y-11.5}" text-anchor="middle" font-size="10" font-weight="700" fill="${col}">${b.uidx+1}</text>`;
+    if(b.divorced) extra+=`<g stroke="var(--soft)" stroke-width="1.7"><line x1="${mx-9}" y1="${b.y-6}" x2="${mx+2}" y2="${b.y+6}"/><line x1="${mx-5}" y1="${b.y-6}" x2="${mx+6}" y2="${b.y+6}"/></g>`;
+    if(b.year) extra+=`<text x="${mx}" y="${b.y+21}" text-anchor="middle" font-size="9" fill="var(--faint)" style="font-family:var(--mono)">${b.divorced?"\u26AE":"\u26AD"}${b.year}</text>`;
+    return `<line x1="${b.x1}" y1="${b.y}" x2="${b.x2}" y2="${b.y}" stroke="${col}" stroke-width="2"${dash}/>${extra}`;}).join("");
+  const cbarSVG=(L.cbars||[]).map(b=>{const mx=(b.x1+b.x2)/2; let e="";
+    if(b.divorced) e+=`<g stroke="var(--soft)" stroke-width="1.7"><line x1="${mx-9}" y1="${b.y-6}" x2="${mx+2}" y2="${b.y+6}"/><line x1="${mx-5}" y1="${b.y-6}" x2="${mx+6}" y2="${b.y+6}"/></g>`;
+    if(b.year) e+=`<text x="${mx}" y="${b.y-11}" text-anchor="middle" font-size="9" fill="var(--faint)" style="font-family:var(--mono)">${b.divorced?"\u26AE":"\u26AD"}${b.year}</text>`;
+    return `<line x1="${b.x1}" y1="${b.y}" x2="${b.x2}" y2="${b.y}" stroke="var(--soft)" stroke-width="1.6"/>${e}`;}).join("");
   const focalName=state.treeMode==="anc"&&G.byId[state.ancFocus]?" of "+fullName(G.byId[state.ancFocus]):"";
   const modeUI=`<div class="tmode">
     <button data-act="mode" data-mode="anc" class="${state.treeMode==="anc"?"on":""}">Ancestors</button>
@@ -723,7 +866,7 @@ function wireGripDrag(){
 }
 function _renderPanel(){
   const panel=$("#panel");
-  if(state.query.trim()&&(state.view==="map"||state.view==="tree")){    // search results list (map: side panel; tree: side panel/sheet)
+  if(state.query.trim()&&(state.view==="map"||state.view==="tree"||state.view==="vtree")){    // search results list (map: side panel; tree: side panel/sheet)
     const q=state.query.trim().toLowerCase();
     const matches=searchPeople(state.people,q);
     const fmt=e=>`${e&&e.y!=null?e.y:"?"}${e&&e.place?" \u00b7 "+esc(e.place):""}`;
@@ -773,13 +916,19 @@ function centerInitial(){const el=$("#tree");if(!el)return;const w=el.clientWidt
   if(!L.nodes.length)return;const tw=(L.maxX-L.minX)||1,th=(L.maxY)||1,fitS=Math.min((w-40)/tw,(h-40)/th);
   if(fitS>=0.5){const s=Math.min(1,fitS);pan={s,x:(w-tw*s)/2-L.minX*s,y:Math.max(16,(h-th*s)/2)};}
   else{const focal=state.treeMode==="anc"?state.ancFocus:state.root;const id=L.nodes.find(n=>n.id===state.selected)?state.selected:focal;const n=L.nodes.find(n=>n.id===id)||L.nodes[0];const s=0.85;
-    if(state.treeMode==="anc") pan={s,x:w-40-(n.x+PW)*s,y:h/2-(n.y+PH/2)*s};   // focal near right, ancestors fan left
+    if(state.view==="vtree"){
+      if(state.treeMode==="anc") pan={s,x:w/2-(n.x+PW/2)*s,y:h-40-(n.y+PH)*s};  // focal near bottom, ancestors fan upward
+      else pan={s,x:w/2-(n.x+PW/2)*s,y:32-n.y*s};                              // roots near top
+    } else if(state.treeMode==="anc") pan={s,x:w-40-(n.x+PW)*s,y:h/2-(n.y+PH/2)*s};   // focal near right, ancestors fan left
     else pan={s,x:32-n.x*s,y:h/2-(n.y+PH/2)*s};}                                 // root near left
   applyPan();}
 function centerStart(){const el=$("#tree");if(!el)return;const w=el.clientWidth||360,h=el.clientHeight||480,L=lastLayout;
   const target=state.treeMode==="anc"?state.ancFocus:state.root;
   const n=L.nodes.find(x=>x.id===target)||L.nodes[0];if(!n)return;const s=0.9;
-  if(state.treeMode==="anc") pan={s,x:w-40-(n.x+PW)*s,y:h/2-(n.y+PH/2)*s};
+  if(state.view==="vtree"){
+    if(state.treeMode==="anc") pan={s,x:w/2-(n.x+PW/2)*s,y:h-40-(n.y+PH)*s};
+    else pan={s,x:w/2-(n.x+PW/2)*s,y:32-n.y*s};
+  } else if(state.treeMode==="anc") pan={s,x:w-40-(n.x+PW)*s,y:h/2-(n.y+PH/2)*s};
   else pan={s,x:32-n.x*s,y:h/2-(n.y+PH/2)*s};
   applyPan();}
 function centerNode(id,s){const el=$("#tree");if(!el)return;const w=el.clientWidth||360,h=el.clientHeight||480,L=lastLayout;
@@ -805,7 +954,7 @@ function wireTree(){
 function zoomBtn(f){const el=$("#tree");if(!el)return;zoomAround((el.clientWidth||360)/2,(el.clientHeight||480)/2,f);}
 
 /* ---- data + events ---- */
-function rebuild(){G=buildGraph(state.people,state.fams);layoutCache={key:null,L:null};}
+function rebuild(){G=buildGraph(state.people,state.fams);layoutCache={key:null,L:null};layoutCacheV={key:null,L:null};}
 function setData(people,fams){state.people=people;state.fams=fams;rebuild();state.root=pickRoot();localDone=false;
   state.descFocus=null;state.ancFocus=pickAncFocus();applyGeocache();
   if(!G.byId[state.selected])state.selected=state.root;state.recenter=true;render();}
@@ -813,7 +962,7 @@ function setData(people,fams){state.people=people;state.fams=fams;rebuild();stat
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]");if(!el)return;const act=el.dataset.act;
   if(act==="view"){ if(state.view==="map"&&el.dataset.view!=="map"&&mapObj){try{mapObj.remove();}catch(e){}mapObj=null;markersLayer=null;}
-    state.view=el.dataset.view;if(state.view==="tree")state.recenter=true;render();}
+    state.view=el.dataset.view;if(state.view==="tree"||state.view==="vtree")state.recenter=true;render();}
   else if(act==="select"){state.selected=el.dataset.id;render();}
   else if(act==="theme"){state.theme=state.theme==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",state.theme);renderChrome();updateMapTheme();}
   else if(act==="open"){$("#file").click();}
@@ -824,8 +973,8 @@ document.addEventListener("click",e=>{
   else if(act==="mode"){const m=el.dataset.mode; if(m!==state.treeMode){ state.treeMode=m;
     if(m==="anc"){ if(state.selected&&G.byId[state.selected])state.ancFocus=state.selected; else if(!state.ancFocus)state.ancFocus=pickAncFocus(); }
     else{ state.descFocus=null; } state.recenter=true; render(); } }
-  else if(act==="anc-focus"){state.treeMode="anc";state.ancFocus=state.selected;state.view="tree";state.recenter=true;render();}
-  else if(act==="desc-focus"){state.treeMode="desc";state.descFocus=state.selected;state.view="tree";state.recenter=true;render();}
+  else if(act==="anc-focus"){state.treeMode="anc";state.ancFocus=state.selected;state.view=(state.view==="vtree")?"vtree":"tree";state.recenter=true;render();}
+  else if(act==="desc-focus"){state.treeMode="desc";state.descFocus=state.selected;state.view=(state.view==="vtree")?"vtree":"tree";state.recenter=true;render();}
   else if(act==="zoom"){zoomBtn(el.dataset.dir==="in"?1.25:0.8);}
   else if(act==="extents"){fitTree();}
   else if(act==="start"){centerStart();}
@@ -852,7 +1001,7 @@ document.addEventListener("click",e=>{
         mapObj.setView([e.lat,e.lon],9); updateMapMarkers(false);
         let hit=null; markersLayer.eachLayer(l=>{const ll=l.getLatLng&&l.getLatLng(); if(ll&&Math.abs(ll.lat-e.lat)<1e-6&&Math.abs(ll.lng-e.lon)<1e-6)hit=l;}); if(hit&&hit.openPopup)hit.openPopup();
       }
-    } else if(state.view==="tree"){                     // refocus the tree on the picked person, then close the results
+    } else if(state.view==="tree"||state.view==="vtree"){ // refocus the tree on the picked person, then close the results
       if(state.treeMode==="anc") state.ancFocus=id; else state.descFocus=id;
       state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();
       render(); centerNode(id,0.9);                       // rebuild layout, then jump straight to the middle of the screen
@@ -906,7 +1055,7 @@ $("#file").addEventListener("change",ev=>{
   if(typeof TextDecoder!=="undefined") reader.readAsArrayBuffer(f); else reader.readAsText(f);
   ev.target.value="";
 });
-window.addEventListener("resize",()=>{if(state.view==="tree")centerInitial();});
+window.addEventListener("resize",()=>{if(state.view==="tree"||state.view==="vtree")centerInitial();});
 
 function saveLastGed(text,filename){
   try{ localStorage.setItem("gv_last_ged",text); localStorage.setItem("gv_last_ged_name",filename||""); }
@@ -934,7 +1083,7 @@ function init(){
   state.selected=null;renderPanel();
 }
 init();
-window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,decodeBuffer,localGeocode,searchPeople,searchScore,saveLastGed,loadLastGed,clearLastGed,mapEvents,get G(){return G;}};
+window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,buildLayoutV,buildAncestryV,buildForestV,decodeBuffer,localGeocode,searchPeople,searchScore,saveLastGed,loadLastGed,clearLastGed,mapEvents,get G(){return G;}};
 </script>
 </body>
 </html>
