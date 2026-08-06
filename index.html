@@ -129,6 +129,7 @@ main{flex:1;min-width:0;position:relative;z-index:0}
 .fact .val{font:13px var(--mono);color:var(--text)}
 .rel-group{margin:14px 0}
 .rel-label{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);margin-bottom:6px}
+.rel-lab{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.03em;margin:14px 0 6px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{padding:5px 10px;border-radius:999px;background:var(--panel2);color:var(--text);font-size:14px;font-weight:500}
 .p-foot{padding:12px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -139,6 +140,10 @@ main{flex:1;min-width:0;position:relative;z-index:0}
 /* map */
 #mapwrap{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column}
 .map-top{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
+.rel-chip{display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--green-soft);border-bottom:1px solid var(--line);flex-shrink:0}
+.rel-chip span{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--green)}
+.rel-chip button{margin-left:auto;color:var(--green);opacity:.75;padding:2px}
+.rel-chip button:active{opacity:1}
 .map-status{font:11px var(--mono);color:var(--soft)}
 #lmap{flex:1;min-height:0;position:relative;background:var(--panel2)}
 .map-msg{padding:18px;text-align:center;color:var(--soft);font-size:14px}
@@ -259,9 +264,9 @@ const SAMPLE_FAMS=[
  {id:"F4",partners:["I7","I10"],children:["I11","I12"],married:{y:1985}},
 ];
 
-const state={people:[],fams:[],theme:"light",view:"tree",treeMode:"anc",ancFocus:null,descFocus:null,selected:null,root:null,query:"",imported:false,bannerOff:false,yearFrom:null,yearTo:null};
+const state={people:[],fams:[],theme:"light",view:"tree",treeMode:"anc",ancFocus:null,descFocus:null,selected:null,root:null,query:"",imported:false,bannerOff:false,yearFrom:null,yearTo:null,relFilter:null,locChooser:null,mapCardId:null};
 let G=null, pan={x:40,y:40,s:1}, lastLayout={minX:0,maxX:0,maxY:0}, layoutCache={root:null,L:null}, layoutCacheV={key:null,L:null};
-let mapObj=null, markersLayer=null, tileLayer=null, geoCache={};
+let mapObj=null, markersLayer=null, tileLayer=null, geoCache={}, markerIndex=new Map();
 
 /* ---- GEDCOM parser (common 5.5.1 / 7.0 shape) ---- */
 function parseGEDCOM(text){
@@ -753,8 +758,8 @@ function mapEvents(){
     if(e&&e.lat!=null&&e.lon!=null&&isFinite(e.lat)&&isFinite(e.lon)) ev.push({id:p.id,kind:k,y:e.y,lat:e.lat,lon:e.lon,place:e.place,p});})); return ev;
 }
 function placesNeeding(){
-  const q=state.query.trim().toLowerCase();
-  const s=new Set(); state.people.forEach(p=>{ if(q&&searchScore(p,q)<0)return;
+  const q=state.query.trim().toLowerCase(), rel=state.relFilter;
+  const s=new Set(); state.people.forEach(p=>{ if(q&&searchScore(p,q)<0)return; if(rel&&!rel.ids.has(p.id))return;
     ["born","died"].forEach(k=>{const e=p[k]; if(e&&e.place&&e.lat==null&&!(e.place in geoCache)) s.add(e.place);}); }); return [...s];
 }
 function applyGeocache(){ state.people.forEach(p=>["born","died"].forEach(k=>{const e=p[k];
@@ -766,8 +771,8 @@ function yearBounds(){
   return {lo:Math.floor(lo/10)*10, hi:Math.ceil(hi/10)*10};
 }
 function plotStats(q){                              // people-level counts (not event-level) for the status line
-  let plotted=0, noInfo=0;
-  state.people.forEach(p=>{ if(q&&searchScore(p,q)<0) return;
+  let plotted=0, noInfo=0; const rel=state.relFilter;
+  state.people.forEach(p=>{ if(q&&searchScore(p,q)<0) return; if(rel&&!rel.ids.has(p.id))return;
     const hasCoord=(p.born&&p.born.lat!=null)||(p.died&&p.died.lat!=null);
     const hasPlace=(p.born&&p.born.place)||(p.died&&p.died.place);
     if(hasCoord) plotted++; if(!hasPlace) noInfo++; });
@@ -784,6 +789,7 @@ function renderMap(main){
       <button class="btn ghost" data-act="geocode" id="geo-btn">${icon(ICONS.pin,15)} Plot locations</button>
       <span class="map-status" id="geo-status">${plotted} plotted${noInfo?" \u00b7 "+noInfo+" with no location":""}${need.length?" \u00b7 "+need.length+" to look up":""}</span>
     </div>
+    ${state.relFilter?`<div class="rel-chip"><span>${icon(ICONS.users,13)} ${esc(state.relFilter.label)}</span><button data-act="clearrel">${icon(ICONS.x,13)}</button></div>`:""}
     <div id="lmap">
       <button class="map-i" data-act="attrib" aria-label="Map data attribution" title="Map data attribution">i</button>
       <div class="map-attrib" id="mapAttrib" style="display:none">\u00a9 OpenStreetMap contributors \u00b7 \u00a9 CARTO</div>
@@ -814,16 +820,63 @@ function saveGeo(){ try{localStorage.setItem("gv_geo",JSON.stringify(geoCache));
 function updateMapMarkers(fit){
   const yl=$("#yrlab"); if(yl)yl.textContent=state.yearFrom+"\u2013"+state.yearTo;
   if(!markersLayer||!window.L) return;
-  markersLayer.clearLayers();
+  markersLayer.clearLayers(); markerIndex.clear();
   const green=cssVar("--green","#005f73"), brass=cssVar("--brass","#0a9396");
-  const q=state.query.trim().toLowerCase();
-  const evs=mapEvents().filter(e=>(e.y==null||(e.y>=state.yearFrom&&e.y<=state.yearTo))&&(!q||searchScore(e.p,q)>=0)), pts=[];
-  evs.forEach(e=>{ const col=e.kind==="born"?green:brass;
-    const m=L.circleMarker([e.lat,e.lon],{radius:6,color:col,weight:2,fillColor:col,fillOpacity:e.kind==="born"?0.85:0.15});
-    m.bindPopup(`<b>${esc(fullName(e.p))}</b><br>${e.kind==="born"?"Born":"Died"} ${e.y||""}${e.place?"<br>"+esc(e.place):""}`);
-    m.on("click",()=>{state.selected=e.id;renderPanel();});
-    m.addTo(markersLayer); pts.push([e.lat,e.lon]); });
+  const q=state.query.trim().toLowerCase(), rel=state.relFilter;
+  const evs=mapEvents().filter(e=>(e.y==null||(e.y>=state.yearFrom&&e.y<=state.yearTo))&&(!q||searchScore(e.p,q)>=0)&&(!rel||rel.ids.has(e.p.id))), pts=[];
+  const groups=new Map();                                       // co-located events share one marker (exact match on rounded coords)
+  evs.forEach(e=>{ const key=e.lat.toFixed(4)+","+e.lon.toFixed(4); if(!groups.has(key))groups.set(key,[]); groups.get(key).push(e); });
+  groups.forEach((group,key)=>{
+    const [lat,lon]=key.split(",").map(Number);
+    const col=group.some(e=>e.kind==="born")?green:brass;
+    const multi=group.length>1;
+    const m=L.circleMarker([lat,lon],{radius:multi?9:6,color:col,weight:2,fillColor:col,fillOpacity:multi?0.9:(group[0].kind==="born"?0.85:0.15)});
+    if(multi){
+      m.bindPopup(`<b>${group.length} people here</b><br>${esc(group[0].place||"")}`);
+      m.on("click",()=>{openLocationChooser(esc(group[0].place||"This location"),
+        group.map(e=>({id:e.p.id,kind:e.kind,name:fullName(e.p),sub:(e.kind==="born"?"b. ":"d. ")+(e.y!=null?e.y:"?")})));});
+    } else {
+      const e=group[0];
+      m.bindPopup(`<b>${esc(fullName(e.p))}</b><br>${e.kind==="born"?"Born":"Died"} ${e.y||""}${e.place?"<br>"+esc(e.place):""}`);
+      m.on("click",()=>{state.locChooser=null;state.selected=e.p.id;state.mapCardId=e.p.id;renderPanel();});
+    }
+    group.forEach(e=>markerIndex.set(e.p.id+":"+e.kind,m));
+    m.addTo(markersLayer); pts.push([lat,lon]);
+  });
   if(fit&&pts.length){ try{mapObj.fitBounds(pts,{padding:[30,30],maxZoom:9});}catch(e){} }
+}
+function zoomToEvent(id,kind){                                   // move the map to one specific person's event and open exactly that marker
+  const p=G.byId[id]; if(!p)return; const e=p[kind]; if(!e||e.lat==null)return;
+  state.locChooser=null;
+  if(e.y!=null&&(e.y<state.yearFrom||e.y>state.yearTo)){          // widen the range in place so their marker isn't filtered out
+    if(e.y<state.yearFrom)state.yearFrom=e.y; if(e.y>state.yearTo)state.yearTo=e.y;
+    const yf=$("#yrFrom"),yt=$("#yrTo"),yl=$("#yrlab");
+    if(yf)yf.value=state.yearFrom; if(yt)yt.value=state.yearTo; if(yl)yl.textContent=state.yearFrom+"\u2013"+state.yearTo;
+  }
+  mapObj.setView([e.lat,e.lon],9); updateMapMarkers(false);
+  const hit=markerIndex.get(id+":"+kind);
+  state.selected=id; state.mapCardId=id;
+  renderPanel();
+  if(hit){ if(hit.setPopupContent) hit.setPopupContent(`<b>${esc(fullName(p))}</b><br>${kind==="born"?"Born":"Died"} ${e.y||""}${e.place?"<br>"+esc(e.place):""}`);
+    if(hit.openPopup) hit.openPopup(); }
+}
+function openLocationChooser(title,items){
+  state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();
+  state.locChooser={title:title||"This location",items};
+  renderPanel();
+}
+function relIds(personId,kind){                                  // graph-derived id set for a relationship-based map filter
+  if(!G.byId[personId]) return new Set();
+  if(kind==="parents") return new Set(G.parentsOf(personId));
+  if(kind==="siblings") return new Set(G.siblingsOf(personId));
+  if(kind==="descendants") return G.downSet(personId);
+  return new Set();
+}
+function setRelFilter(personId,kind){
+  const ids=relIds(personId,kind); const p=G.byId[personId]; if(!p||!ids.size){toast("No one to show for that",true);return;}
+  const label={parents:"Parents",siblings:"Siblings",descendants:"Descendants"}[kind]+" of "+fullName(p);
+  state.relFilter={label,ids,personId,kind}; state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();
+  state.locChooser=null; state.mapCardId=null; state.view="map"; state.yearFrom=null; state.yearTo=null; render();
 }
 async function geocodePlaces(){
   if(!window.L){toast("Open the map first (needs internet)",true);return;}
@@ -866,6 +919,20 @@ function wireGripDrag(){
 }
 function _renderPanel(){
   const panel=$("#panel");
+  if(state.locChooser){                                          // choose between co-located people, or between a person's birth/death location
+    const c=state.locChooser;
+    panel.className="";
+    panel.innerHTML=`<div class="grip"></div>
+      <div class="p-head" style="padding-bottom:10px">
+        <div style="flex:1;min-width:0"><h2 style="font-size:18px">${esc(c.title)}</h2>
+          <div class="p-sub">${c.items.length} to choose from</div></div>
+        <button class="close" data-act="closechooser">${icon(ICONS.x,18)}</button></div>
+      <div class="p-body">${c.items.map(it=>`<button class="mr-row" data-act="pickevent" data-id="${it.id}" data-kind="${it.kind}">
+          <div class="mr-name">${esc(it.name||it.label||"")}</div>
+          <div class="mr-fact">${esc(it.sub||"")}</div>
+        </button>`).join("")}</div>`;
+    return;
+  }
   if(state.query.trim()&&(state.view==="map"||state.view==="tree"||state.view==="vtree")){    // search results list (map: side panel; tree: side panel/sheet)
     const q=state.query.trim().toLowerCase();
     const matches=searchPeople(state.people,q);
@@ -885,8 +952,7 @@ function _renderPanel(){
       }</div>`;
     return;
   }
-  if(state.view==="map"){ panel.className="hidden"; panel.innerHTML=""; return; }
-  const p=G.byId[state.selected];
+  const p=G.byId[state.view==="map"?state.mapCardId:state.selected];
   if(!p){panel.className="hidden";panel.innerHTML="";return;}
   panel.className="";
   const av=p.sex==="F"?"f":"m";
@@ -902,6 +968,12 @@ function _renderPanel(){
     ${relGroup("Partners",ICONS.heart,G.spousesOf(p.id))}
     ${relGroup("Siblings",ICONS.users,G.siblingsOf(p.id))}
     ${relGroup("Children",ICONS.baby,G.childrenOf(p.id))}
+    ${(G.parentsOf(p.id).length||G.siblingsOf(p.id).length||G.downSet(p.id).size)?`<div class="rel-lab">${icon(ICONS.map,13)} View on map</div>
+    <div class="chips">
+      ${G.parentsOf(p.id).length?`<button class="chip" data-act="relmap" data-id="${p.id}" data-kind="parents">Parents</button>`:""}
+      ${G.siblingsOf(p.id).length?`<button class="chip" data-act="relmap" data-id="${p.id}" data-kind="siblings">Siblings</button>`:""}
+      ${G.downSet(p.id).size?`<button class="chip" data-act="relmap" data-id="${p.id}" data-kind="descendants">Descendants</button>`:""}
+    </div>`:""}
   </div>
   <div class="p-foot"><button class="btn" data-act="anc-focus">${icon(ICONS.up,15)} Ancestors</button><button class="btn" data-act="desc-focus">${icon(ICONS.baby,15)} Descendants</button><button class="btn" data-act="tomap" style="grid-column:1/-1">${icon(ICONS.map,15)} Show ${esc(p.surname||p.given)} on map</button></div>`;
 }
@@ -962,8 +1034,9 @@ function setData(people,fams){state.people=people;state.fams=fams;rebuild();stat
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]");if(!el)return;const act=el.dataset.act;
   if(act==="view"){ if(state.view==="map"&&el.dataset.view!=="map"&&mapObj){try{mapObj.remove();}catch(e){}mapObj=null;markersLayer=null;}
+    if(el.dataset.view==="map"&&state.view!=="map")state.mapCardId=null;
     state.view=el.dataset.view;if(state.view==="tree"||state.view==="vtree")state.recenter=true;render();}
-  else if(act==="select"){state.selected=el.dataset.id;render();}
+  else if(act==="select"){state.selected=el.dataset.id;if(state.view==="map")state.mapCardId=el.dataset.id;render();}
   else if(act==="theme"){state.theme=state.theme==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",state.theme);renderChrome();updateMapTheme();}
   else if(act==="open"){$("#file").click();}
   else if(act==="banner-off"){state.bannerOff=true;render();}
@@ -979,39 +1052,41 @@ document.addEventListener("click",e=>{
   else if(act==="extents"){fitTree();}
   else if(act==="start"){centerStart();}
   else if(act==="attrib"){ const a=$("#mapAttrib"); if(a) a.style.display=a.style.display==="none"?"block":"none"; }
+  else if(act==="clearrel"){ state.relFilter=null; renderMap($("#main")); }
   else if(act==="geocode"){geocodePlaces();}
   else if(act==="clearsearch"){dismissPanel();}
   else if(act==="tomap"){ const p=G.byId[state.selected]; if(!p)return;
     state.query=(p.surname&&p.surname.trim())?p.surname.trim():fullName(p);
-    state.view="map"; state.yearFrom=null; state.yearTo=null;
+    state.view="map"; state.yearFrom=null; state.yearTo=null; state.mapCardId=null;
     const s=$("#search"); if(s)s.value=state.query; render(); }
   else if(act==="pickresult"){ const id=el.dataset.id; state.selected=id;
     if(state.view==="map"){
-      state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();renderPanel();   // close the results list so the map is fully visible
       const p=G.byId[id];
-      const e=(p.born&&p.born.lat!=null)?p.born:((p.died&&p.died.lat!=null)?p.died:null);
-      if(!e){ toast("Tap \u201cPlot locations\u201d to map this person",true); }
+      const hasBorn=p.born&&p.born.lat!=null, hasDied=p.died&&p.died.lat!=null;
+      if(!hasBorn&&!hasDied){ state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();renderPanel();
+        toast("Tap \u201cPlot locations\u201d to map this person",true); }
       else if(!mapObj||!window.L){ toast("Map is still loading \u2014 try again in a moment",true); }
-      else{
-        if(e.y!=null&&(e.y<state.yearFrom||e.y>state.yearTo)){                     // widen the range in place so their marker isn't filtered out
-          if(e.y<state.yearFrom)state.yearFrom=e.y; if(e.y>state.yearTo)state.yearTo=e.y;
-          const yf=$("#yrFrom"),yt=$("#yrTo"),yl=$("#yrlab");
-          if(yf)yf.value=state.yearFrom; if(yt)yt.value=state.yearTo; if(yl)yl.textContent=state.yearFrom+"\u2013"+state.yearTo;
-        }
-        mapObj.setView([e.lat,e.lon],9); updateMapMarkers(false);
-        let hit=null; markersLayer.eachLayer(l=>{const ll=l.getLatLng&&l.getLatLng(); if(ll&&Math.abs(ll.lat-e.lat)<1e-6&&Math.abs(ll.lng-e.lon)<1e-6)hit=l;}); if(hit&&hit.openPopup)hit.openPopup();
+      else if(hasBorn&&hasDied){                                 // let them choose which location to view
+        openLocationChooser(fullName(p), [
+          {p,kind:"born",id}, {p,kind:"died",id}
+        ].map(x=>({id:x.id,kind:x.kind,name:x.kind==="born"?"Born":"Died",sub:(x.kind==="born"?p.born:p.died).place+" \u00b7 "+((x.kind==="born"?p.born:p.died).y??"?")})));
       }
+      else{ state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();
+        zoomToEvent(id, hasBorn?"born":"died"); }
     } else if(state.view==="tree"||state.view==="vtree"){ // refocus the tree on the picked person, then close the results
       if(state.treeMode==="anc") state.ancFocus=id; else state.descFocus=id;
       state.query="";const s=$("#search");if(s)s.value="";syncSearchClear();
       render(); centerNode(id,0.9);                       // rebuild layout, then jump straight to the middle of the screen
     } }
+  else if(act==="relmap"){ setRelFilter(el.dataset.id, el.dataset.kind); }
+  else if(act==="pickevent"){ zoomToEvent(el.dataset.id, el.dataset.kind); }
+  else if(act==="closechooser"){ state.locChooser=null; renderPanel(); }
 });
 function dismissPanel(){
   if(state.query.trim()){
     state.query="";const s=$("#search");if(s)s.value="";
     applySearchInput();
-  } else { $("#panel").className="hidden"; syncScrim(); }
+  } else { if(state.view==="map")state.mapCardId=null; $("#panel").className="hidden"; syncScrim(); }
 }
 function syncSearchClear(){ const b=$("#searchClear"); if(b) b.style.display=state.query.trim()?"grid":"none"; }
 function applySearchInput(){
@@ -1083,7 +1158,7 @@ function init(){
   state.selected=null;renderPanel();
 }
 init();
-window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,buildLayoutV,buildAncestryV,buildForestV,decodeBuffer,localGeocode,searchPeople,searchScore,saveLastGed,loadLastGed,clearLastGed,mapEvents,get G(){return G;}};
+window.GedcomViewer={state,parseGEDCOM,setData,buildGraph,buildLayout,buildLayoutV,buildAncestryV,buildForestV,decodeBuffer,localGeocode,searchPeople,searchScore,saveLastGed,loadLastGed,clearLastGed,mapEvents,relIds,setRelFilter,zoomToEvent,openLocationChooser,renderPanel,get markerIndex(){return markerIndex;},get G(){return G;}};
 </script>
 </body>
 </html>
